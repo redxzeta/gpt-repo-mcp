@@ -140,9 +140,11 @@ Codex is done. Review the Codex result and the git diff for <repo_id>.
 | Category | Tools |
 | --- | --- |
 | Repo discovery | `repo_list_roots`, `repo_tree`, `repo_search`, `repo_fetch_file`, `repo_read_many` |
+| Repo intelligence | `repo_symbol_outline`, `repo_dependency_map`, `repo_validation_plan`, `repo_agent_context` |
 | Policy help | `repo_policy_explain` |
 | Planning | `repo_project_brief`, `repo_task_inventory`, `repo_decision_memory`, `repo_change_plan`, `repo_next_action`, `repo_plan_review` |
 | Git review | `repo_git_status`, `repo_git_diff`, `repo_git_review` |
+| GitHub issues | `repo_github_issues`, `repo_github_issue_create`, `repo_github_issue_comment`, `repo_github_pr_comment` |
 | File writes | `repo_write_file`, `repo_write_changes` |
 | ChatGPT session continuity | `repo_write_handoff`, `repo_last_write` |
 | Local ship flow | `repo_write_stage`, `repo_write_unstage`, `repo_write_commit`, `repo_write_stage_commit`, `repo_write_recover`, `repo_cleanup_paths` |
@@ -201,6 +203,7 @@ Use `repo_write_handoff` when you want ChatGPT to write local context for a futu
 GPT Repo MCP is intentionally not a shell runner.
 
 - ChatGPT works through named repository ids and repo-relative paths.
+- GitHub issue viewing is read-only, scoped to the approved repo's GitHub `origin`, and uses the local `gh` CLI account when available.
 - Mutating tools are disabled until a repo opts in.
 - File writes are checked against allow/deny policy, path sandboxing, size limits, and secret scanning.
 - Git tools operate only on explicit paths and local commits.

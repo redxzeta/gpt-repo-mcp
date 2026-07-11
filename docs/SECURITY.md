@@ -9,6 +9,12 @@ Read tools use read-only annotations:
 - `openWorldHint: false`
 - `idempotentHint: true`
 
+`repo_github_issues` is also read-only and idempotent, but uses `openWorldHint: true` because it reads GitHub through the local `gh` CLI account.
+
+`repo_github_issue_create` uses mutating annotations with `openWorldHint: true` because it creates GitHub issues through the local `gh` CLI account.
+
+`repo_github_issue_comment` and `repo_github_pr_comment` use the same mutating open-world annotation because they post comments through the local `gh` CLI account.
+
 Mutating tools use separate write annotations:
 
 - `readOnlyHint: false`
@@ -17,6 +23,8 @@ Mutating tools use separate write annotations:
 - `idempotentHint: false`
 
 No shell execution tools, arbitrary command runners, direct Codex execution tools, push/pull/reset/checkout/switch/rebase/merge/stash/clean tools, force operations, or branch deletion tools are registered. Safe local git staging and commit tools use fixed `git` argument arrays through `execFile`; they are not arbitrary git command runners. Advisory tools such as `repo_change_plan` and `repo_next_action` return plans and recommendations only; they do not write files or run tests.
+
+Repo intelligence tools such as `repo_symbol_outline`, `repo_dependency_map`, `repo_validation_plan`, and `repo_agent_context` are read-only static analysis helpers. They do not run package scripts, import project code, execute tests, or mutate files.
 
 Codex task tools do not run Codex or execute commands. `repo_prepare_codex_task` renders a prompt in tool output, `repo_write_codex_task` writes local prompt metadata under `.chatgpt/codex-runs/` through the normal write policy, and `repo_codex_review` reads the run result plus git review state. The user remains responsible for running Codex separately.
 
@@ -27,6 +35,24 @@ The default OSS connection path is `npm run connect`. It starts the local MCP se
 That random path token is guess-resistance only, not authentication. Anyone with the full URL can reach the MCP endpoint while the public tunnel is running, so treat it as a temporary local development endpoint and stop it when done.
 
 Network exposure does not bypass repository policy. ChatGPT still supplies only `repo_id`; approved roots, default excludes, path sandboxing, secret checks, read/write policies, expected HEAD checks, and tool schemas still apply. Mutating tools remain disabled unless the target repo explicitly enables writes or operations.
+
+## GitHub Issues Boundary
+
+`repo_github_issues` is a read-only external lookup tool. It uses the local `gh` CLI account already configured on the machine and scopes every issue query to the approved repository's GitHub `origin` remote.
+
+Allowed commands are fixed argument-array calls, not shell strings:
+
+- `git remote get-url origin`
+- `gh issue list --repo <owner/name> --state <state> --limit <n> --json ...`
+- `gh issue create --repo <owner/name> --title <title> [--body ...] [--label ...] [--assignee ...] [--milestone ...]`
+
+The tool does not accept arbitrary GitHub repository names from clients. It does not create, edit, comment on, close, label, assign, or otherwise mutate issues. If `gh` is unavailable, unauthenticated, or the origin is not a supported GitHub remote, the tool returns a structured warning instead of falling back to another network credential path.
+
+Authentication remains owned by the local `gh` installation, usually through the operating system keyring. GPT Repo MCP does not store a GitHub token in its config and does not require `GITHUB_TOKEN` for this tool.
+
+`repo_github_issue_create` follows the same origin scoping and local `gh` auth model, but it is mutating because it creates issues. It uses fixed `gh issue create --repo <owner/name> ...` argument arrays, never shell strings, and never accepts an arbitrary GitHub repository name from the client. If `gh` is unavailable, unauthenticated, or the origin is not a supported GitHub remote, the tool returns a structured warning instead of creating an issue.
+
+`repo_github_issue_comment` and `repo_github_pr_comment` follow the same origin scoping and local `gh` auth model, but they are mutating because they post comments. They use fixed `gh issue comment <number> --repo <owner/name> --body <text>` and `gh pr comment <number> --repo <owner/name> --body <text>` argument arrays, never shell strings, and never accept arbitrary GitHub repository names from the client.
 
 OpenAI Secure MCP Tunnel is an advanced option for longer-lived or private connector setups when supported. In that mode, the local MCP endpoint stays private at `/mcp`, while `tunnel-client` opens an outbound connection to OpenAI and forwards MCP requests back to the local server. Store the tunnel runtime API key in `.env` or another local secret store, never in committed files.
 

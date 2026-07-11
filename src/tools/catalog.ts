@@ -1,12 +1,18 @@
 import { descriptions } from "./descriptions.js";
-import { readOnlyAnnotations, writeAnnotations } from "./annotations.js";
+import { externalReadOnlyAnnotations, externalWriteAnnotations, readOnlyAnnotations, writeAnnotations } from "./annotations.js";
 import { toolContracts, type ToolContract, type ToolName } from "./contracts.js";
 import {
   changePlanHandler,
   cleanupPathsHandler,
   codexReviewHandler,
   decisionMemoryHandler,
+  dependencyMapHandler,
   fetchFileHandler,
+  agentContextHandler,
+  githubIssuesHandler,
+  githubIssueCreateHandler,
+  githubIssueCommentHandler,
+  githubPrCommentHandler,
   gitCommitHandler,
   gitDiffHandler,
   gitReviewHandler,
@@ -22,8 +28,10 @@ import {
   projectBriefHandler,
   readManyHandler,
   searchHandler,
+  symbolOutlineHandler,
   taskInventoryHandler,
   treeHandler,
+  validationPlanHandler,
   writeCommitHandler,
   writeRecoverHandler,
   writeStageCommitHandler,
@@ -43,7 +51,7 @@ export type ToolDefinition = {
   description: string;
   inputSchema: ToolContract["input"];
   outputSchema: ToolContract["output"];
-  annotations: typeof readOnlyAnnotations | typeof writeAnnotations;
+  annotations: typeof readOnlyAnnotations | typeof externalReadOnlyAnnotations | typeof externalWriteAnnotations | typeof writeAnnotations;
   handler: ToolHandler;
 };
 
@@ -110,6 +118,78 @@ export const toolCatalog: ToolDefinition[] = [
     outputSchema: toolContracts.repo_read_many.output,
     annotations: readOnlyAnnotations,
     handler: readManyHandler
+  },
+  {
+    name: "repo_symbol_outline",
+    title: "Outline repository symbols",
+    description: descriptions.repo_symbol_outline,
+    inputSchema: toolContracts.repo_symbol_outline.input,
+    outputSchema: toolContracts.repo_symbol_outline.output,
+    annotations: readOnlyAnnotations,
+    handler: symbolOutlineHandler
+  },
+  {
+    name: "repo_dependency_map",
+    title: "Map repository dependencies",
+    description: descriptions.repo_dependency_map,
+    inputSchema: toolContracts.repo_dependency_map.input,
+    outputSchema: toolContracts.repo_dependency_map.output,
+    annotations: readOnlyAnnotations,
+    handler: dependencyMapHandler
+  },
+  {
+    name: "repo_validation_plan",
+    title: "Plan repository validation",
+    description: descriptions.repo_validation_plan,
+    inputSchema: toolContracts.repo_validation_plan.input,
+    outputSchema: toolContracts.repo_validation_plan.output,
+    annotations: readOnlyAnnotations,
+    handler: validationPlanHandler
+  },
+  {
+    name: "repo_agent_context",
+    title: "Read repository agent context",
+    description: descriptions.repo_agent_context,
+    inputSchema: toolContracts.repo_agent_context.input,
+    outputSchema: toolContracts.repo_agent_context.output,
+    annotations: readOnlyAnnotations,
+    handler: agentContextHandler
+  },
+  {
+    name: "repo_github_issues",
+    title: "View GitHub issues",
+    description: descriptions.repo_github_issues,
+    inputSchema: toolContracts.repo_github_issues.input,
+    outputSchema: toolContracts.repo_github_issues.output,
+    annotations: externalReadOnlyAnnotations,
+    handler: githubIssuesHandler
+  },
+  {
+    name: "repo_github_issue_create",
+    title: "Create GitHub issue",
+    description: descriptions.repo_github_issue_create,
+    inputSchema: toolContracts.repo_github_issue_create.input,
+    outputSchema: toolContracts.repo_github_issue_create.output,
+    annotations: externalWriteAnnotations,
+    handler: githubIssueCreateHandler
+  },
+  {
+    name: "repo_github_issue_comment",
+    title: "Comment on GitHub issue",
+    description: descriptions.repo_github_issue_comment,
+    inputSchema: toolContracts.repo_github_issue_comment.input,
+    outputSchema: toolContracts.repo_github_issue_comment.output,
+    annotations: externalWriteAnnotations,
+    handler: githubIssueCommentHandler
+  },
+  {
+    name: "repo_github_pr_comment",
+    title: "Comment on GitHub pull request",
+    description: descriptions.repo_github_pr_comment,
+    inputSchema: toolContracts.repo_github_pr_comment.input,
+    outputSchema: toolContracts.repo_github_pr_comment.output,
+    annotations: externalWriteAnnotations,
+    handler: githubPrCommentHandler
   },
   {
     name: "repo_git_status",

@@ -13,6 +13,22 @@ export const descriptions = {
     "Use this when the user names a specific file or after repo_tree/repo_search identifies a relevant file. Supports line ranges. Do not use for broad repository review.",
   repo_read_many:
     "Use this when the user asks to read a bounded set of explicit files or glob-matched files. Do not use this to read an entire repository.",
+  repo_symbol_outline:
+    "Use this when the user asks to understand a repo or file set efficiently through imports, exports, top-level symbols, classes, interfaces, types, functions, or Markdown headings before reading full files.",
+  repo_dependency_map:
+    "Use this when the user asks what imports what, what depends on a file, which modules are coupled, or how a TypeScript/JavaScript subsystem is connected. Reads static imports only and never executes code.",
+  repo_validation_plan:
+    "Use this when the user asks what checks to run, how to validate a change, or how to tailor verification to changed paths. Returns advisory commands only and never runs them.",
+  repo_agent_context:
+    "Use this when the user asks how to work in a repo, what agents should read first, or what project-specific rules apply. Reads bounded guidance from AGENTS.md, CONTRIBUTING, README, docs, runbooks, and package scripts.",
+  repo_github_issues:
+    "Use this when the user asks to view GitHub issues for an approved repo. Uses the local gh CLI account, scopes reads to the repo origin, returns issue summaries only, and never mutates GitHub.",
+  repo_github_issue_create:
+    "Use this when the user asks to create a GitHub issue in an approved repo. Uses the local gh CLI account, scopes writes to the repo origin, and never accepts an arbitrary GitHub repository name.",
+  repo_github_issue_comment:
+    "Use this when the user asks to comment on a GitHub issue in an approved repo. Uses the local gh CLI account, scopes writes to the repo origin, and requires an explicit issue number and comment body.",
+  repo_github_pr_comment:
+    "Use this when the user asks to comment on a GitHub pull request in an approved repo. Uses the local gh CLI account, scopes writes to the repo origin, and requires an explicit PR number and comment body.",
   repo_git_status:
     "Use this when the user asks for git status, branch, dirty files, or changed file counts. Do not use this to inspect file contents.",
   repo_git_diff:

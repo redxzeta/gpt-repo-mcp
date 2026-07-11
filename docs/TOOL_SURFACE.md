@@ -141,6 +141,129 @@ Example:
 { "repo_id": "example-repo", "paths": ["README.md", "docs/ARCHITECTURE.md"], "max_files": 2 }
 ```
 
+### `repo_symbol_outline`
+
+Returns a bounded static outline for source and Markdown files. Use it before
+reading full files in large repositories when imports, exports, top-level
+symbols, or headings are enough to choose the next focused read.
+
+Input: `repo_id`, optional `paths[]`, `include_globs[]`, `exclude_globs[]`,
+`max_files`, and `max_symbols`.
+Output: `files[]` with imports and symbols, `counts`, `truncated`, and
+`warnings`.
+Example:
+
+```json
+{ "repo_id": "ice-council", "include_globs": ["src/services/*.ts"], "max_files": 25 }
+```
+
+### `repo_dependency_map`
+
+Returns static TypeScript/JavaScript import relationships. It resolves
+repo-local relative imports when possible and reports external packages and
+unresolved imports. It never executes code.
+
+Input: `repo_id`, optional `paths[]`, `include_globs[]`, `direction`
+(`imports`, `imported_by`, or `both`), and `max_edges`.
+Output: `edges[]`, `hotspots[]`, `external_packages[]`,
+`unresolved_imports[]`, `counts`, `truncated`, and `warnings`.
+Example:
+
+```json
+{ "repo_id": "ice-council", "paths": ["src/services/equityEvaluationService.ts"], "direction": "both" }
+```
+
+### `repo_validation_plan`
+
+Recommends validation commands from package scripts, changed paths, and an
+optional goal. The returned commands are advisory only; the tool does not run
+tests, builds, scripts, package managers, or shell commands.
+
+Input: `repo_id`, optional `changed_paths[]`, optional `goal`.
+Output: `commands[]`, `affected_areas[]`, optional `package_manager`, and
+`warnings`.
+Example:
+
+```json
+{ "repo_id": "ice-council", "changed_paths": ["src/routes/equityLifecycleRoutes.ts"], "goal": "route change" }
+```
+
+### `repo_agent_context`
+
+Returns bounded project-specific guidance for agents and ChatGPT sessions from
+files such as `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, architecture docs,
+runbooks, and package scripts when present.
+
+Input: `repo_id`, optional `focus`.
+Output: `read_first[]`, `guidance[]`, `scripts[]`, and `warnings`.
+Example:
+
+```json
+{ "repo_id": "ice-council", "focus": "robinhood" }
+```
+
+### `repo_github_issues`
+
+Views GitHub issues for the approved repo. The tool derives `owner/name` from
+the repo's GitHub `origin` remote and uses the local authenticated `gh` CLI
+account. It is read-only and never creates, edits, comments on, closes, labels,
+assigns, or mutates issues.
+
+Input: `repo_id`, optional `state` (`open`, `closed`, or `all`), optional
+`labels[]`, optional `query`, and optional `max_results`.
+Output: optional `repository`, `issues[]`, `count`, and `warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "state": "open", "max_results": 20 }
+```
+
+### `repo_github_issue_create`
+
+Creates a GitHub issue for the approved repo using the local authenticated
+`gh` CLI account. The tool derives the repository from the repo's GitHub
+`origin` remote and never accepts an arbitrary GitHub repository name.
+
+Input: `repo_id`, required `title`, optional `body`, optional `labels[]`,
+optional `assignees[]`, optional `milestone`, and optional `dry_run`.
+Output: optional `repository`, optional `issue_number`, `title`, optional `url`,
+`dry_run`, and `warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "title": "Add symbol outline tool", "labels": ["enhancement"] }
+```
+
+### `repo_github_issue_comment`
+
+Comments on a GitHub issue for the approved repo using the local authenticated
+`gh` CLI account. The tool derives the repository from the repo's GitHub
+`origin` remote and requires an explicit issue number.
+
+Input: `repo_id`, required `issue_number`, required `body`, optional `dry_run`.
+Output: optional `repository`, `dry_run`, optional `target_number`, and
+`warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "issue_number": 12, "body": "Acknowledged. I'll take this next." }
+```
+
+### `repo_github_pr_comment`
+
+Comments on a GitHub pull request for the approved repo using the local
+authenticated `gh` CLI account. The tool derives the repository from the repo's
+GitHub `origin` remote and requires an explicit PR number.
+
+Input: `repo_id`, required `pr_number`, required `body`, optional `dry_run`.
+Output: optional `repository`, `dry_run`, optional `target_number`, and
+`warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "pr_number": 42, "body": "Looks good to merge." }
+```
+
 ### `repo_git_status`
 
 Returns branch, head SHA, clean flag, file statuses, and status counts.

@@ -5,6 +5,7 @@ import { CleanupService } from "../services/cleanup-service.js";
 import { RepoTreeService } from "../services/repo-tree-service.js";
 import { SearchService } from "../services/search-service.js";
 import { FileReader } from "../services/file-reader.js";
+import { GitHubIssuesService } from "../services/github-issues-service.js";
 import { GitService } from "../services/git-service.js";
 import { GitReviewService } from "../services/git-review-service.js";
 import { GitOperationsService } from "../services/git-operations-service.js";
@@ -24,6 +25,7 @@ import { FileWriter } from "../services/file-writer.js";
 import { WriteChangesService } from "../services/write-changes-service.js";
 import { WritePolicy } from "../services/write-policy.js";
 import { OperationReceiptService } from "../services/operation-receipt-service.js";
+import { RepoIntelligenceService } from "../services/repo-intelligence-service.js";
 import { createErrorEnvelope, createSuccessEnvelope } from "../runtime/result-envelope.js";
 import { toRepoReaderError } from "../runtime/errors.js";
 import { audit } from "../runtime/telemetry.js";
@@ -31,7 +33,9 @@ import type { RuntimeContext } from "../runtime/context.js";
 import type { SearchOptions } from "../services/search-service.js";
 import type { FetchFileOptions } from "../services/file-reader.js";
 import type { TreeOptions } from "../services/repo-tree-service.js";
+import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssuesInput, GitHubPullRequestCommentInput } from "../contracts/github.contract.js";
 import type { ProjectBriefInput } from "../contracts/project.contract.js";
+import type { AgentContextInput, DependencyMapInput, SymbolOutlineInput, ValidationPlanInput } from "../contracts/repo-intelligence.contract.js";
 import type { TaskInventoryInput } from "../contracts/task.contract.js";
 import type { DecisionLogInput } from "../contracts/decision.contract.js";
 import type { ChangePlanInput } from "../contracts/change-plan.contract.js";
@@ -120,6 +124,69 @@ export const readManyHandler: ToolHandler = async (input, context) => safeTool<R
   const result = await new ReadManyService(repo.root, sandbox, context.registry.limits).readMany(args);
   audit({ tool: "repo_read_many", repo_id: args.repo_id, paths: result.files.map((file) => file.path), counts: { returned: result.files.length, skipped: result.skipped.length }, truncated: result.truncated });
   return createSuccessEnvelope(result, `Read ${result.files.length} files; skipped ${result.skipped.length}.`);
+});
+
+export const symbolOutlineHandler: ToolHandler = async (input, context) => safeTool<SymbolOutlineInput>("repo_symbol_outline", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new RepoIntelligenceService(repo.root, new PathSandbox(repo.root)).symbolOutline(args);
+  audit({ tool: "repo_symbol_outline", repo_id: args.repo_id, paths: result.files.map((file) => file.path), counts: result.counts, truncated: result.truncated, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Outlined ${result.counts.symbols} symbols across ${result.counts.files} files.`);
+});
+
+export const dependencyMapHandler: ToolHandler = async (input, context) => safeTool<DependencyMapInput>("repo_dependency_map", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new RepoIntelligenceService(repo.root, new PathSandbox(repo.root)).dependencyMap(args);
+  audit({ tool: "repo_dependency_map", repo_id: args.repo_id, paths: args.paths, counts: result.counts, truncated: result.truncated, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Returned ${result.counts.edges} dependency edges.`);
+});
+
+export const validationPlanHandler: ToolHandler = async (input, context) => safeTool<ValidationPlanInput>("repo_validation_plan", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new RepoIntelligenceService(repo.root, new PathSandbox(repo.root)).validationPlan(args);
+  audit({ tool: "repo_validation_plan", repo_id: args.repo_id, paths: args.changed_paths, counts: { commands: result.commands.length, areas: result.affected_areas.length }, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Recommended ${result.commands.length} validation commands.`);
+});
+
+export const agentContextHandler: ToolHandler = async (input, context) => safeTool<AgentContextInput>("repo_agent_context", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new RepoIntelligenceService(repo.root, new PathSandbox(repo.root)).agentContext(args);
+  audit({ tool: "repo_agent_context", repo_id: args.repo_id, paths: result.read_first.map((entry) => entry.path), counts: { docs: result.guidance.length, scripts: result.scripts.length }, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Returned ${result.guidance.length} agent context documents.`);
+});
+
+export const githubIssuesHandler: ToolHandler = async (input, context) => safeTool<GitHubIssuesInput>("repo_github_issues", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubIssuesService(repo.root).listIssues(args);
+  audit({ tool: "repo_github_issues", repo_id: args.repo_id, counts: { issues: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} GitHub issues for ${result.repository}.` : "No GitHub repository was detected.");
+});
+
+export const githubIssueCreateHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueCreateInput>("repo_github_issue_create", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubIssuesService(repo.root).createIssue(args);
+  audit({ tool: "repo_github_issue_create", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(
+    result,
+    result.dry_run
+      ? `Dry run checked GitHub issue creation for ${args.title}.`
+      : result.url
+        ? `Created GitHub issue ${result.url}.`
+        : `Issue creation did not complete for ${args.title}.`
+  );
+});
+
+export const githubIssueCommentHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueCommentInput>("repo_github_issue_comment", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubIssuesService(repo.root).commentOnIssue(args);
+  audit({ tool: "repo_github_issue_comment", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.dry_run ? `Dry run checked issue comment on #${args.issue_number}.` : `Commented on issue #${args.issue_number}.`);
+});
+
+export const githubPrCommentHandler: ToolHandler = async (input, context) => safeTool<GitHubPullRequestCommentInput>("repo_github_pr_comment", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubIssuesService(repo.root).commentOnPullRequest(args);
+  audit({ tool: "repo_github_pr_comment", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.dry_run ? `Dry run checked PR comment on #${args.pr_number}.` : `Commented on PR #${args.pr_number}.`);
 });
 
 export const gitStatusHandler: ToolHandler = async (input, context) => safeTool<RepoInput>("repo_git_status", input, context, async (args) => {

@@ -13,6 +13,8 @@ GPT Repo MCP (`gpt-repo-mcp`) is a tool-only MCP server. There is no widget in v
 - `src/tools/define-tool.ts` converts contract objects to MCP SDK schemas and registers metadata.
 - `src/tools/handlers.ts` contains thin adapters from tool input to services.
 - `src/services/*` contains filesystem, git, search, tree, read, write, project, task, decision, and advisory planning logic.
+- `RepoIntelligenceService` contains bounded read-only code and documentation analysis for symbol outlines, dependency maps, validation planning, and agent context.
+- `GitHubIssuesService` is the narrow external boundary for GitHub issues and shells out only to fixed `git remote get-url origin`, `gh issue list --repo <origin-owner/name>`, `gh issue create --repo <origin-owner/name>`, `gh issue comment <number> --repo <origin-owner/name>`, and `gh pr comment <number> --repo <origin-owner/name>` argument arrays.
 - `src/policies/*` contains shared limits, excludes, write defaults, and secret patterns.
 - `src/runtime/*` contains context, structured errors, result envelopes, and audit logging.
 
@@ -54,6 +56,10 @@ write handlers -> OperationReceiptService
 
 Read-only git status and diff operations are owned by `GitService`. Safe local git staging, one-call reviewed stage-and-commit, commit, and explicit worktree restore operations are separate opt-in mutating tools with their own contracts, policy checks, and service logic. Advisory services call existing factual services where practical instead of bypassing repo policy.
 
+Read-only repo intelligence tools use the same approved-root, path sandbox, default excludes, file classification, and bounded-read helpers as other read tools. They summarize static structure only: imports, top-level symbols, documentation guidance, package scripts, and advisory validation commands. They do not execute package scripts, import project code, run tests, or mutate files.
+
+`repo_github_issues` is read-only but open-world because it reads GitHub through the local `gh` CLI. `repo_github_issue_create`, `repo_github_issue_comment`, and `repo_github_pr_comment` are the paired mutating tools for creating and commenting. All derive the GitHub repository from the approved repo's `origin` remote and pass `--repo owner/name` explicitly. They do not accept arbitrary repository names from tool input and do not call unrelated `gh` subcommands.
+
 Git recovery is separate from write tools. `repo_write_file` and `repo_write_changes` write files only. `repo_write_recover` is the reviewed composite recovery helper: after `expected_head_sha` verification it can unstage explicit paths, restore explicit tracked worktree paths, and clean explicit generated artifacts through cleanup policy in one approved call. `repo_git_restore_paths` remains the granular worktree-only restore tool with fixed `git restore -- <paths>` arguments; it does not unstage, stage, commit, reset, checkout, clean, stash, restore the whole repo, or run shell commands.
 
 `repo_git_review` remains read-only, but it is the workflow hub after write operations. It classifies changed paths and returns ready-to-run payloads for composite `repo_write_stage_commit` and `repo_write_recover` workflows, plus granular explicit worktree restore, cleanup-eligible generated untracked paths, unstage, stage, and commit operations without executing any of them. When staged paths exist, it adds guidance that granular restore is worktree-only while `repo_write_recover` can explicitly unstage and restore the same reviewed path in one approved call.
@@ -65,6 +71,7 @@ The preferred high-level mutation flow is `repo_git_review` followed by the revi
 The advisory tools are read-only:
 
 - Onboarding/daily planning: `repo_project_brief` -> `repo_task_inventory` -> `repo_next_action`
+- Large-repo orientation: `repo_agent_context` -> `repo_symbol_outline` -> `repo_dependency_map` -> targeted `repo_read_many`
 - Project memory: `repo_decision_memory`
 - Implementation/refactor/debug planning: `repo_decision_memory` when conventions matter -> `repo_change_plan` -> targeted `repo_search`/`repo_fetch_file`/`repo_read_many`
 - Current-change review: `repo_git_status` -> `repo_git_diff`

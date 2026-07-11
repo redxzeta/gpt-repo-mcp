@@ -6,12 +6,14 @@ import { DecisionLogInputSchema, DecisionLogResultSchema } from "../contracts/de
 import { FetchFileInputSchema, FileContentSchema, ReadManyInputSchema, ReadManyResultSchema } from "../contracts/file.contract.js";
 import { GitCommitInputSchema, GitCommitResultSchema, GitRecoverInputSchema, GitRecoverResultSchema, GitRestorePathsInputSchema, GitRestorePathsResultSchema, GitStageCommitInputSchema, GitStageCommitResultSchema, GitStageInputSchema, GitStageResultSchema, GitUnstageInputSchema, GitUnstageResultSchema } from "../contracts/git-operations.contract.js";
 import { GitDiffInputSchema, GitDiffResultSchema, GitStatusInputSchema, GitStatusResultSchema } from "../contracts/git.contract.js";
+import { GitHubCommentResultSchema, GitHubIssueCommentInputSchema, GitHubIssueCreateInputSchema, GitHubIssueCreateResultSchema, GitHubIssuesInputSchema, GitHubIssuesResultSchema, GitHubPullRequestCommentInputSchema } from "../contracts/github.contract.js";
 import { GitReviewInputSchema, GitReviewResultSchema } from "../contracts/git-review.contract.js";
 import { HandoffInputSchema, HandoffResultSchema } from "../contracts/handoff.contract.js";
 import { NextActionInputSchema, NextActionResultSchema } from "../contracts/next-action.contract.js";
 import { LastWriteInputSchema, LastWriteResultSchema } from "../contracts/operation-receipt.contract.js";
 import { PolicyExplainInputSchema, PolicyExplainResultSchema } from "../contracts/policy.contract.js";
 import { ProjectBriefInputSchema, ProjectBriefResultSchema } from "../contracts/project.contract.js";
+import { AgentContextInputSchema, AgentContextResultSchema, DependencyMapInputSchema, DependencyMapResultSchema, SymbolOutlineInputSchema, SymbolOutlineResultSchema, ValidationPlanInputSchema, ValidationPlanResultSchema } from "../contracts/repo-intelligence.contract.js";
 import { RepoInputSchema, RepoListResultSchema, RepoTreeInputSchema } from "../contracts/repo.contract.js";
 import { PlanReviewInputSchema, PlanReviewResultSchema } from "../contracts/review.contract.js";
 import { SearchInputSchema, SearchResponseSchema } from "../contracts/search.contract.js";
@@ -27,6 +29,14 @@ export type ToolName =
   | "repo_search"
   | "repo_fetch_file"
   | "repo_read_many"
+  | "repo_symbol_outline"
+  | "repo_dependency_map"
+  | "repo_validation_plan"
+  | "repo_agent_context"
+  | "repo_github_issues"
+  | "repo_github_issue_create"
+  | "repo_github_issue_comment"
+  | "repo_github_pr_comment"
   | "repo_git_status"
   | "repo_git_diff"
   | "repo_git_review"
@@ -86,6 +96,38 @@ export const toolContracts = {
   repo_read_many: {
     input: ReadManyInputSchema,
     output: ReadManyResultSchema
+  },
+  repo_symbol_outline: {
+    input: SymbolOutlineInputSchema,
+    output: SymbolOutlineResultSchema
+  },
+  repo_dependency_map: {
+    input: DependencyMapInputSchema,
+    output: DependencyMapResultSchema
+  },
+  repo_validation_plan: {
+    input: ValidationPlanInputSchema,
+    output: ValidationPlanResultSchema
+  },
+  repo_agent_context: {
+    input: AgentContextInputSchema,
+    output: AgentContextResultSchema
+  },
+  repo_github_issues: {
+    input: GitHubIssuesInputSchema,
+    output: GitHubIssuesResultSchema
+  },
+  repo_github_issue_create: {
+    input: GitHubIssueCreateInputSchema,
+    output: GitHubIssueCreateResultSchema
+  },
+  repo_github_issue_comment: {
+    input: GitHubIssueCommentInputSchema,
+    output: GitHubCommentResultSchema
+  },
+  repo_github_pr_comment: {
+    input: GitHubPullRequestCommentInputSchema,
+    output: GitHubCommentResultSchema
   },
   repo_git_status: {
     input: GitStatusInputSchema,
