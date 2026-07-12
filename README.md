@@ -143,6 +143,7 @@ Codex is done. Review the Codex result and the git diff for <repo_id>.
 | Repo intelligence | `repo_symbol_outline`, `repo_dependency_map`, `repo_validation_plan`, `repo_agent_context` |
 | Policy help | `repo_policy_explain` |
 | Planning | `repo_project_brief`, `repo_task_inventory`, `repo_decision_memory`, `repo_change_plan`, `repo_next_action`, `repo_plan_review` |
+| Release | `repo_release_notes` |
 | Git review | `repo_git_status`, `repo_git_diff`, `repo_git_review` |
 | GitHub issues | `repo_github_issues`, `repo_github_issue_create`, `repo_github_issue_comment`, `repo_github_pr_comment` |
 | File writes | `repo_write_file`, `repo_write_changes` |

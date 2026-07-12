@@ -134,5 +134,7 @@ export const descriptions = {
   repo_apply_patch:
     "Use this when the user asks to apply a unified diff patch to the repository.",
   repo_manifest:
-    "Use this when the user asks what tools are available, current tool profile, or active policies."
+    "Use this when the user asks what tools are available, current tool profile, or active policies.",
+  repo_release_notes:
+    "Use this when the user asks for release notes, a changelog, or what changed between versions or tags."
 } as const;

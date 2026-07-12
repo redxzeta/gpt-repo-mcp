@@ -17,6 +17,7 @@ import { LastWriteInputSchema, LastWriteResultSchema } from "../contracts/operat
 import { PolicyExplainInputSchema, PolicyExplainResultSchema } from "../contracts/policy.contract.js";
 import { ProjectBriefInputSchema, ProjectBriefResultSchema } from "../contracts/project.contract.js";
 import { AgentContextInputSchema, AgentContextResultSchema, DependencyMapInputSchema, DependencyMapResultSchema, SymbolOutlineInputSchema, SymbolOutlineResultSchema, ValidationPlanInputSchema, ValidationPlanResultSchema } from "../contracts/repo-intelligence.contract.js";
+import { ReleaseNotesInputSchema, ReleaseNotesResultSchema } from "../contracts/release-notes.contract.js";
 import { RepoInputSchema, RepoListResultSchema, RepoTreeInputSchema } from "../contracts/repo.contract.js";
 import { PlanReviewInputSchema, PlanReviewResultSchema } from "../contracts/review.contract.js";
 import { SearchInputSchema, SearchResponseSchema } from "../contracts/search.contract.js";
@@ -92,7 +93,8 @@ export type ToolName =
   | "repo_action_recent"
   | "repo_create_files"
   | "repo_apply_patch"
-  | "repo_manifest";
+  | "repo_manifest"
+  | "repo_release_notes";
 
 export type ToolContract = {
   input: z.ZodObject<z.ZodRawShape>;
@@ -371,5 +373,9 @@ export const toolContracts = {
   repo_manifest: {
     input: ManifestInputSchema,
     output: ManifestResultSchema
+  },
+  repo_release_notes: {
+    input: ReleaseNotesInputSchema,
+    output: ReleaseNotesResultSchema
   }
 } as const satisfies Record<ToolName, ToolContract>;

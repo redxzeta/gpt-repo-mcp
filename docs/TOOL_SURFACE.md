@@ -857,6 +857,14 @@ Work with GitHub Milestones:
 2. Call `repo_github_milestone_read` for full milestone details.
 3. Call `repo_github_milestone_create` to create a new milestone.
 
+Generate release notes:
+
+1. Call `repo_release_notes` to generate notes from git history.
+2. Omit `from_ref` to auto-detect the latest tag as the starting point.
+3. Omit `to_ref` to default to HEAD.
+4. Commits are categorized by conventional commit prefixes: `feat:`, `fix:`, `BREAKING CHANGE`.
+5. The result includes structured categories and a markdown summary.
+
 Create a ChatGPT handoff:
 
 1. Run `repo_git_status`.

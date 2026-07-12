@@ -1849,6 +1849,32 @@ describe("MCP contract", () => {
             ],
             "title": "Tool manifest and policies",
           },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+            },
+            "description": "Use this when the user asks for release notes, a changelog, or what changed between versions or tags.",
+            "inputKeys": [
+              "from_ref",
+              "max_bytes",
+              "repo_id",
+              "to_ref",
+            ],
+            "name": "repo_release_notes",
+            "outputKeys": [
+              "categories",
+              "commit_count",
+              "from",
+              "markdown",
+              "to",
+              "truncated",
+              "warnings",
+            ],
+            "title": "Generate release notes",
+          },
         ]
       `);
     } finally {
@@ -2190,7 +2216,8 @@ function representativeCalls(head: string): Record<string, Record<string, unknow
     why: "Output schema should validate for the handoff tool.",
     next_steps: [{ title: "Review handoff output" }],
     dry_run: true
-  }
+  },
+  repo_release_notes: { repo_id: "fixture" }
   };
 }
 

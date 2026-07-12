@@ -29,6 +29,7 @@ import { OperationReceiptService } from "../services/operation-receipt-service.j
 import { RepoIntelligenceService } from "../services/repo-intelligence-service.js";
 import { ActionService } from "../services/action-service.js";
 import { FileCreateService, PatchService } from "../services/file-create-service.js";
+import { ReleaseNotesService } from "../services/release-notes-service.js";
 import { createErrorEnvelope, createSuccessEnvelope } from "../runtime/result-envelope.js";
 import { toRepoReaderError } from "../runtime/errors.js";
 import { audit } from "../runtime/telemetry.js";
@@ -58,6 +59,7 @@ import type { CleanupPathsInput } from "../contracts/cleanup.contract.js";
 import type { HandoffInput, HandoffListInput, HandoffListResult } from "../contracts/handoff.contract.js";
 import type { ActionCancelInput, ActionDescribeInput, ActionListInput, ActionLogsInput, ActionRecentInput, ActionRunInput, ActionStatusInput } from "../contracts/actions.contract.js";
 import type { ManifestInput, ManifestResult } from "../contracts/manifest.contract.js";
+import type { ReleaseNotesInput } from "../contracts/release-notes.contract.js";
 import { toolCatalog } from "./catalog.js";
 import type { ApplyPatchInput, CreateFilesInput } from "../contracts/file-operations.contract.js";
 
@@ -808,4 +810,11 @@ export const manifestHandler: ToolHandler = async (input, context) => safeTool<M
   };
   audit({ tool: "repo_manifest", repo_id: args.repo_id, counts: { tools: result.tool_count } });
   return createSuccessEnvelope(result, `Manifest: ${result.tool_count} tools (${result.profile} profile).`);
+});
+
+export const releaseNotesHandler: ToolHandler = async (input, context) => safeTool<ReleaseNotesInput>("repo_release_notes", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new ReleaseNotesService(repo.root).generate(args);
+  audit({ tool: "repo_release_notes", repo_id: args.repo_id, counts: { commits: result.commit_count } });
+  return createSuccessEnvelope(result, `Release notes: ${result.commit_count} commits from ${result.from} to ${result.to}.`);
 });

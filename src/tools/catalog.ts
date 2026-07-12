@@ -68,6 +68,7 @@ import {
   listHandoffsHandler,
   manifestHandler,
   policyExplainHandler,
+  releaseNotesHandler,
   writeStageHandler,
   writeUnstageHandler,
   type ToolHandler
@@ -764,5 +765,15 @@ export const toolCatalog: ToolDefinition[] = [
     effect: "local-read",
     annotations: readOnlyAnnotations,
     handler: manifestHandler
+  },
+  {
+    name: "repo_release_notes",
+    title: "Generate release notes",
+    description: descriptions.repo_release_notes,
+    inputSchema: toolContracts.repo_release_notes.input,
+    outputSchema: toolContracts.repo_release_notes.output,
+    effect: "local-read",
+    annotations: readOnlyAnnotations,
+    handler: releaseNotesHandler
   }
 ];
