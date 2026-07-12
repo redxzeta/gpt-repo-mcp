@@ -24,6 +24,12 @@ Mutating tools use separate write annotations:
 
 No shell execution tools, arbitrary command runners, direct Codex execution tools, push/pull/reset/checkout/switch/rebase/merge/stash/clean tools, force operations, or branch deletion tools are registered. Safe local git staging and commit tools use fixed `git` argument arrays through `execFile`; they are not arbitrary git command runners. Advisory tools such as `repo_change_plan` and `repo_next_action` return plans and recommendations only; they do not write files or run tests.
 
+Action tools (`repo_action_list`, `repo_action_describe`, `repo_action_run`, `repo_action_status`, `repo_action_logs`, `repo_action_cancel`, `repo_action_recent`) execute only pre-configured commands defined in the repo's `actions` configuration. The model cannot specify arbitrary commands. `repo_action_run` executes synchronously with bounded output capture and worktree change tracking. `repo_action_cancel` terminates running actions gracefully. The action service uses `spawn` with `detached: true` for process management and does not accept shell strings.
+
+File creation tools (`repo_create_files`) create new files atomically without overwriting existing ones. Files go through the same path validation, secret scanning, and size checks as write tools. `repo_apply_patch` applies unified diff patches via stdin-based `git apply` with HEAD SHA validation and content secret scanning.
+
+GitHub PR tools (`repo_github_pr_list`, `repo_github_pr_read`, `repo_github_pr_create`, `repo_github_pr_checks`) follow the same origin scoping and local `gh` auth model as issue tools. Read tools are idempotent and open-world. Mutating tools (`repo_github_pr_create`) use fixed `gh pr create --repo <owner/name> ...` argument arrays and require explicit user approval.
+
 Repo intelligence tools such as `repo_symbol_outline`, `repo_dependency_map`, `repo_validation_plan`, and `repo_agent_context` are read-only static analysis helpers. They do not run package scripts, import project code, execute tests, or mutate files.
 
 Codex task tools do not run Codex or execute commands. `repo_prepare_codex_task` renders a prompt in tool output, `repo_write_codex_task` writes local prompt metadata under `.chatgpt/codex-runs/` through the normal write policy, and `repo_codex_review` reads the run result plus git review state. The user remains responsible for running Codex separately.
@@ -36,6 +42,24 @@ That random path token is guess-resistance only, not authentication. Anyone with
 
 Network exposure does not bypass repository policy. ChatGPT still supplies only `repo_id`; approved roots, default excludes, path sandboxing, secret checks, read/write policies, expected HEAD checks, and tool schemas still apply. Mutating tools remain disabled unless the target repo explicitly enables writes or operations.
 
+## Actions Policy
+
+Actions are disabled by default for every repo. A repo must opt in with `actions.enabled: true` and define allowed actions in the `actions.definitions` array. Each action has a name, command, optional arguments, optional environment variables, optional working directory, optional timeout, optional max output bytes, and optional annotation.
+
+`repo_action_list` shows available actions. `repo_action_describe` provides detailed action information. `repo_action_run` executes an action synchronously with structured results including run metadata, stdout/stderr capture, and worktree change tracking. `repo_action_status` and `repo_action_logs` check results. `repo_action_cancel` terminates running actions. `repo_action_recent` lists recent action runs.
+
+Actions execute only pre-configured commands; the model cannot specify arbitrary commands. The action service uses `spawn` with `detached: true` for process management and does not accept shell strings.
+
+## GitHub Projects Boundary
+
+Project tools use the local `gh` CLI account and scope operations to the repository owner derived from the origin remote. `repo_github_project_list`, `repo_github_project_read`, and `repo_github_project_item_list` are read-only. `repo_github_project_create` and `repo_github_project_item_add` are mutating and use fixed `gh project` argument arrays.
+
+Projects require the `project` scope on the `gh` token (`gh auth refresh -s project`). If the scope is missing, the tool returns a structured warning instead of falling back to another credential path.
+
+## GitHub Milestones Boundary
+
+Milestone tools use the local `gh` CLI account and scope operations to the repository origin. `repo_github_milestone_list` and `repo_github_milestone_read` are read-only and use `gh api` REST endpoints. `repo_github_milestone_create` is mutating and uses `gh api` with fixed argument arrays.
+
 ## GitHub Issues Boundary
 
 `repo_github_issues` is a read-only external lookup tool. It uses the local `gh` CLI account already configured on the machine and scopes every issue query to the approved repository's GitHub `origin` remote.
@@ -44,15 +68,20 @@ Allowed commands are fixed argument-array calls, not shell strings:
 
 - `git remote get-url origin`
 - `gh issue list --repo <owner/name> --state <state> --limit <n> --json ...`
+- `gh issue view <number> --repo <owner/name> --json ...`
 - `gh issue create --repo <owner/name> --title <title> [--body ...] [--label ...] [--assignee ...] [--milestone ...]`
+- `gh issue comment <number> --repo <owner/name> --body <text>`
+- `gh pr list --repo <owner/name> --state <state> --limit <n> --json ...`
+- `gh pr view <number> --repo <owner/name> --json ...`
+- `gh pr create --repo <owner/name> --title <title> [--body ...] [--base ...] [--head ...]`
+- `gh pr checks <number> --repo <owner/name> --json ...`
+- `gh pr comment <number> --repo <owner/name> --body <text>`
 
-The tool does not accept arbitrary GitHub repository names from clients. It does not create, edit, comment on, close, label, assign, or otherwise mutate issues. If `gh` is unavailable, unauthenticated, or the origin is not a supported GitHub remote, the tool returns a structured warning instead of falling back to another network credential path.
+The tool does not accept arbitrary GitHub repository names from clients. It does not create, edit, comment on, close, label, assign, or otherwise mutate issues or pull requests unless explicitly using the mutating tools. If `gh` is unavailable, unauthenticated, or the origin is not a supported GitHub remote, the tool returns a structured warning instead of falling back to another network credential path.
 
 Authentication remains owned by the local `gh` installation, usually through the operating system keyring. GPT Repo MCP does not store a GitHub token in its config and does not require `GITHUB_TOKEN` for this tool.
 
-`repo_github_issue_create` follows the same origin scoping and local `gh` auth model, but it is mutating because it creates issues. It uses fixed `gh issue create --repo <owner/name> ...` argument arrays, never shell strings, and never accepts an arbitrary GitHub repository name from the client. If `gh` is unavailable, unauthenticated, or the origin is not a supported GitHub remote, the tool returns a structured warning instead of creating an issue.
-
-`repo_github_issue_comment` and `repo_github_pr_comment` follow the same origin scoping and local `gh` auth model, but they are mutating because they post comments. They use fixed `gh issue comment <number> --repo <owner/name> --body <text>` and `gh pr comment <number> --repo <owner/name> --body <text>` argument arrays, never shell strings, and never accept arbitrary GitHub repository names from the client.
+`repo_github_issue_create`, `repo_github_issue_comment`, `repo_github_pr_comment`, `repo_github_pr_create`, `repo_github_project_create`, `repo_github_project_item_add`, and `repo_github_milestone_create` follow the same origin scoping and local `gh` auth model, but they are mutating because they create issues, post comments, create pull requests, create projects, add items to projects, or create milestones. They use fixed argument arrays, never shell strings, and never accept an arbitrary GitHub repository name from the client.
 
 OpenAI Secure MCP Tunnel is an advanced option for longer-lived or private connector setups when supported. In that mode, the local MCP endpoint stays private at `/mcp`, while `tunnel-client` opens an outbound connection to OpenAI and forwards MCP requests back to the local server. Store the tunnel runtime API key in `.env` or another local secret store, never in committed files.
 

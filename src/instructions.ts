@@ -21,5 +21,14 @@ export const SERVER_INSTRUCTIONS = [
   "All paths are repo-relative POSIX paths and all repository access is scoped by repo_id.",
   "Default excludes and secret blocking are enforced by the server; do not ask for absolute paths or secrets.",
   "When a read, write, or cleanup policy question is blocked or the user asks what ChatGPT can access, call repo_policy_explain with the relevant repo_id and path before guessing. Use its code, matched_globs, effective_policy, local git operation toggles, and guidance to explain supported read/write/cleanup policy and enabled operation settings.",
-  "Nested repositories and submodules are separate trust boundaries and are not read unless registered as their own repo_id."
+  "Nested repositories and submodules are separate trust boundaries and are not read unless registered as their own repo_id.",
+  "Use repo_action_list, repo_action_describe, repo_action_run, repo_action_status, repo_action_logs, repo_action_cancel, and repo_action_recent when the user asks to run or manage configured actions. Actions are pre-defined commands in the repo config; the model cannot specify arbitrary commands. repo_action_run executes synchronously and returns structured results with worktree changes.",
+  "repo_action_run and repo_action_cancel are mutating tools. All other action tools are read-only.",
+  "Use repo_create_files when the user explicitly asks to create new files without overwriting existing ones. Creates up to 25 files atomically with optional parent directory creation. Never overwrites existing files.",
+  "Use repo_apply_patch when the user explicitly asks to apply a unified diff patch. Validates expected HEAD SHA, applies patch via git apply, and returns affected file hashes. Requires explicit user approval.",
+  "Use repo_github_issue_read to read full issue details, repo_github_pr_list to list pull requests, repo_github_pr_read to read PR details, repo_github_pr_create to create PRs, and repo_github_pr_checks to check CI status. These tools use the local gh CLI account scoped to the repo origin.",
+  "repo_github_issue_create, repo_github_issue_comment, repo_github_pr_comment, and repo_github_pr_create are mutating tools that require explicit user approval before executing.",
+  "Use repo_github_project_list, repo_github_project_read, and repo_github_project_item_list to browse GitHub projects for the repository owner. Use repo_github_project_create and repo_github_project_item_add to create projects and add items. Projects require the gh project scope (gh auth refresh -s project).",
+  "Use repo_github_milestone_list and repo_github_milestone_read to browse GitHub milestones for an approved repo. Use repo_github_milestone_create to create milestones. These tools use the local gh CLI account scoped to the repo origin.",
+  "repo_github_project_create, repo_github_project_item_add, and repo_github_milestone_create are mutating tools that require explicit user approval before executing."
 ].join(" ");

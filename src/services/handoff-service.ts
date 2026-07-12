@@ -165,10 +165,10 @@ function renderCurrentPointer(input: HandoffInput, status: GitStatus, handoffPat
 
 function renderStartupPrompt(repoId: string, handoffPath: string): string {
   return [
-    `Använd GPT-Repo-MCP mot repo_id \`${repoId}\`.`,
-    `Läs \`${CURRENT_PATH}\` och sedan \`${handoffPath}\`.`,
-    "Kör `repo_git_status`.",
-    "Fortsätt från handoffens \"Next steps\"."
+    `Use GPT-Repo-MCP against repo_id \`${repoId}\`.`,
+    `Read \`${CURRENT_PATH}\` and then \`${handoffPath}\`.`,
+    "Run `repo_git_status`.",
+    'Continue from the handoff\'s "Next steps".'
   ].join("\n");
 }
 

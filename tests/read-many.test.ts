@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { RootRegistry } from "../src/services/root-registry.js";
+import { createSessionCache } from "../src/runtime/session-cache.js";
 import type { ReadManyResult } from "../src/services/read-many-service.js";
 import { readManyHandler } from "../src/tools/handlers.js";
 import { createRepoFixture } from "./fixtures/repo-fixture.js";
@@ -10,7 +11,7 @@ async function createContext() {
     repos: [{ repo_id: "fixture", display_name: "Fixture", root: fixture.root }],
     limits: { max_files: 3, max_bytes_per_file: 128_000, max_total_bytes: 750_000 }
   });
-  return { fixture, context: { registry } };
+  return { fixture, context: { registry, limits: registry.limits, toolProfile: "full" as const, cache: createSessionCache() } };
 }
 
 describe("repo_read_many", () => {

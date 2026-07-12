@@ -1,48 +1,31 @@
 import { readFile } from "node:fs/promises";
 import { realpath } from "node:fs/promises";
-import { z } from "zod";
+import { RepoReaderConfigSchema, type RepoConfig as RepoConfigType } from "../config/schema.js";
 import { DEFAULT_LIMITS } from "../policies/limits.js";
 import { RepoReaderError } from "../runtime/errors.js";
-import { OperationsPolicyConfigSchema, WritePolicyConfigSchema } from "../config/schema.js";
 
-const RepoConfigSchema = z.object({
-  repo_id: z.string().min(1),
-  display_name: z.string().min(1),
-  root: z.string().min(1),
-  writes: WritePolicyConfigSchema.optional(),
-  operations: OperationsPolicyConfigSchema.optional()
-});
-
-const ConfigSchema = z.object({
-  repos: z.array(RepoConfigSchema).default([]),
-  limits: z.object({
-    max_files: z.number().int().positive().optional(),
-    max_bytes_per_file: z.number().int().positive().optional(),
-    max_total_bytes: z.number().int().positive().optional()
-  }).default({})
-});
-
-export type RepoConfig = z.infer<typeof RepoConfigSchema>;
-export type RepoReaderConfig = z.infer<typeof ConfigSchema>;
-type RepoReaderConfigInput = z.input<typeof ConfigSchema>;
+export type RepoConfig = RepoConfigType;
 
 export class RootRegistry {
   private constructor(
     private readonly repos: RepoConfig[],
-    readonly limits: Required<RepoReaderConfig["limits"]>
+    readonly limits: Required<typeof DEFAULT_LIMITS>,
+    readonly toolProfile: "core" | "full"
   ) {}
 
-  static async fromConfig(config: RepoReaderConfigInput): Promise<RootRegistry> {
-    const parsed = ConfigSchema.parse(config);
-    const repos = [];
+  static async fromConfig(config: unknown): Promise<RootRegistry> {
+    const parsed = RepoReaderConfigSchema.parse(config);
+    const repos: RepoConfig[] = [];
     for (const repo of parsed.repos) {
       repos.push({ ...repo, root: await realpath(repo.root) });
     }
-    return new RootRegistry(repos, {
-      max_files: parsed.limits.max_files ?? DEFAULT_LIMITS.max_files,
-      max_bytes_per_file: parsed.limits.max_bytes_per_file ?? DEFAULT_LIMITS.max_bytes_per_file,
-      max_total_bytes: parsed.limits.max_total_bytes ?? DEFAULT_LIMITS.max_total_bytes
-    });
+    const limits = { ...DEFAULT_LIMITS };
+    for (const [key, value] of Object.entries(parsed.limits)) {
+      if (value !== undefined) {
+        (limits as Record<string, number>)[key] = value as number;
+      }
+    }
+    return new RootRegistry(repos, limits, parsed.tool_profile);
   }
 
   static async fromFile(configPath: string): Promise<RootRegistry> {

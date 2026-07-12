@@ -13,8 +13,11 @@ GPT Repo MCP (`gpt-repo-mcp`) is a tool-only MCP server. There is no widget in v
 - `src/tools/define-tool.ts` converts contract objects to MCP SDK schemas and registers metadata.
 - `src/tools/handlers.ts` contains thin adapters from tool input to services.
 - `src/services/*` contains filesystem, git, search, tree, read, write, project, task, decision, and advisory planning logic.
+- `ActionService` manages configured command execution with structured run metadata, bounded output capture, and worktree change tracking.
+- `FileCreateService` handles create-only atomic multi-file creation with path validation and secret scanning.
+- `PatchService` applies unified diff patches via stdin-based `git apply` with HEAD SHA validation.
 - `RepoIntelligenceService` contains bounded read-only code and documentation analysis for symbol outlines, dependency maps, validation planning, and agent context.
-- `GitHubIssuesService` is the narrow external boundary for GitHub issues and shells out only to fixed `git remote get-url origin`, `gh issue list --repo <origin-owner/name>`, `gh issue create --repo <origin-owner/name>`, `gh issue comment <number> --repo <origin-owner/name>`, and `gh pr comment <number> --repo <origin-owner/name>` argument arrays.
+- `GitHubService` is the narrow external boundary for GitHub issues, pull requests, CI checks, projects, and milestones. It shells out only to fixed `gh` CLI argument arrays scoped to the approved repo's origin remote.
 - `src/policies/*` contains shared limits, excludes, write defaults, and secret patterns.
 - `src/runtime/*` contains context, structured errors, result envelopes, and audit logging.
 
@@ -96,5 +99,9 @@ Do not duplicate path validation, ignore handling, secret scanning, schema defin
 ## Mutating Tools
 
 Mutating tools are disabled by default per repository and must be enabled through explicit repo-local policy. `repo_write_file` can write or exact-match edit one file inside configured allowed globs and outside configured denied globs. `repo_write_changes` applies the same write/edit semantics to an ordered multi-file edit pack and supports grouped same-file exact-match edits without allowing duplicate top-level paths.
+
+`repo_create_files` creates new files atomically without overwriting existing ones. `repo_apply_patch` applies unified diff patches via stdin-based `git apply` with HEAD SHA validation.
+
+`repo_action_run` executes configured commands synchronously with bounded output capture and worktree change tracking. `repo_action_cancel` terminates running actions gracefully.
 
 Mutating tools must stay separate from read tools. Do not loosen read services to support mutation, do not add shell execution, and do not add broad git automation. Safe git tools stage explicit paths, unstage explicit paths, restore explicit worktree paths, or create a local commit from an exact staged path list only after policy and HEAD checks. Cleanup tools remove only explicit generated artifacts allowed by cleanup policy.

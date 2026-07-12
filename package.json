@@ -7,12 +7,12 @@
   "description": "Read-mostly MCP server for controlled ChatGPT access to approved local repositories with opt-in safe file and git operations.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CAHN91/gpt-repo-mcp.git"
+    "url": "git+https://github.com/redxzeta/gpt-repo-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/CAHN91/gpt-repo-mcp/issues"
+    "url": "https://github.com/redxzeta/gpt-repo-mcp/issues"
   },
-  "homepage": "https://github.com/CAHN91/gpt-repo-mcp#readme",
+  "homepage": "https://github.com/redxzeta/gpt-repo-mcp#readme",
   "keywords": [
     "mcp",
     "chatgpt",

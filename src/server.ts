@@ -5,6 +5,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { RootRegistry } from "./services/root-registry.js";
 import { createMcpServer } from "./register.js";
 import type { RuntimeContext } from "./runtime/context.js";
+import { createSessionCache } from "./runtime/session-cache.js";
 import { buildMcpRoutePatterns, isAuthorizedMcpPath, sanitizeMcpRouteForAudit } from "./runtime/mcp-routes.js";
 import {
   createRequestId,
@@ -20,7 +21,8 @@ const publicPathToken = process.env.GPT_REPO_PUBLIC_PATH_TOKEN ?? process.env.RE
 const registry = configPath
   ? await RootRegistry.fromFile(configPath)
   : await RootRegistry.fromConfig({ repos: [], limits: {} });
-const context: RuntimeContext = { registry };
+const cache = createSessionCache();
+const context: RuntimeContext = { registry, limits: registry.limits, toolProfile: registry.toolProfile, cache };
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -236,7 +238,27 @@ app.delete(mcpRoutePatterns, async (req: Request, res: Response) => {
   });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   const localPath = publicPathToken ? "/t/[token]/mcp" : "/mcp";
   console.error(`gpt-repo-mcp listening on http://localhost:${port}${localPath}`);
 });
+
+async function shutdown(signal: string): Promise<void> {
+  console.error(`\n${signal} received. Shutting down...`);
+  for (const [id, transport] of Object.entries(transports)) {
+    try {
+      await transport.close();
+    } catch {
+      // transport may already be closed
+    }
+    delete transports[id];
+  }
+  server.close(() => {
+    console.error("Server closed.");
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 5000);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

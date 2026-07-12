@@ -815,6 +815,48 @@ Delegate to Codex:
 4. After Codex finishes, call `repo_codex_review` with the returned `run_id`.
 5. Review `codex_result` and `git_review`, then use review-provided commit or recovery payloads after user approval.
 
+Run a configured action:
+
+1. Call `repo_action_list` to see available actions.
+2. Call `repo_action_describe` for detailed action information.
+3. Call `repo_action_run` to execute the action.
+4. Call `repo_action_status` or `repo_action_logs` to check results.
+5. Use `repo_action_cancel` if the action needs to be stopped.
+
+Create files:
+
+1. Call `repo_create_files` with the files to create.
+2. Files are created atomically; existing files are never overwritten.
+3. Use `create_parent_directories: true` to create missing parent dirs.
+
+Apply a patch:
+
+1. Call `repo_apply_patch` with the unified diff content.
+2. Use `dry_run: true` to preview before applying.
+3. The patch is applied via `git apply` with HEAD SHA validation.
+
+Work with GitHub PRs:
+
+1. Call `repo_github_pr_list` to list pull requests.
+2. Call `repo_github_pr_read` for full PR details.
+3. Call `repo_github_pr_create` to create a new PR.
+4. Call `repo_github_pr_checks` to check CI status.
+5. Call `repo_github_issue_read` to read issue details.
+
+Work with GitHub Projects:
+
+1. Call `repo_github_project_list` to list projects for the repo owner.
+2. Call `repo_github_project_read` for full project details.
+3. Call `repo_github_project_item_list` to list items in a project.
+4. Call `repo_github_project_create` to create a new project.
+5. Call `repo_github_project_item_add` to add an issue/PR to a project.
+
+Work with GitHub Milestones:
+
+1. Call `repo_github_milestone_list` to list milestones.
+2. Call `repo_github_milestone_read` for full milestone details.
+3. Call `repo_github_milestone_create` to create a new milestone.
+
 Create a ChatGPT handoff:
 
 1. Run `repo_git_status`.

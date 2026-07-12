@@ -20,13 +20,27 @@ export const OperationsPolicyConfigSchema = z.object({
   cleanup_allowed_globs: z.array(z.string()).default(DEFAULT_OPERATIONS_POLICY.cleanup_allowed_globs)
 }).passthrough();
 
+export const ActionDefinitionSchema = z.object({
+  command: z.string().min(1).describe("Shell command to execute."),
+  args: z.array(z.string()).default([]).describe("Arguments to pass to the command."),
+  timeout_ms: z.number().int().positive().default(120000).describe("Execution timeout in milliseconds."),
+  mutates_files: z.boolean().default(false).describe("Whether this action may mutate files.")
+}).passthrough();
+
+export const ActionsConfigSchema = z.object({
+  enabled: z.boolean().default(false).describe("Enable action execution tools."),
+  max_concurrent: z.number().int().positive().default(2).describe("Maximum concurrent action runs."),
+  definitions: z.record(z.string(), ActionDefinitionSchema).default({}).describe("Named action definitions.")
+}).passthrough();
+
 export const RepoConfigSchema = z.object({
   repo_id: z.string().min(1),
   display_name: z.string().min(1),
   root: z.string().min(1),
   allow_non_git: z.boolean().optional(),
   writes: WritePolicyConfigSchema.default(DEFAULT_WRITE_POLICY),
-  operations: OperationsPolicyConfigSchema.default(DEFAULT_OPERATIONS_POLICY)
+  operations: OperationsPolicyConfigSchema.default(DEFAULT_OPERATIONS_POLICY),
+  actions: ActionsConfigSchema.optional()
 }).passthrough();
 
 export const LimitsConfigSchema = z.object({
@@ -40,16 +54,22 @@ export const LimitsConfigSchema = z.object({
   max_task_inventory_file_bytes: PositiveIntSchema.optional(),
   max_project_brief_doc_bytes: PositiveIntSchema.optional(),
   max_depth: PositiveIntSchema.optional(),
-  max_diff_bytes: PositiveIntSchema.optional()
+  max_diff_bytes: PositiveIntSchema.optional(),
+  max_decision_log_source_bytes: PositiveIntSchema.optional(),
+  max_decision_log_sources: PositiveIntSchema.optional(),
+  max_change_plan_files: PositiveIntSchema.optional(),
+  max_change_plan_tree_pages: PositiveIntSchema.optional()
 }).passthrough();
 
 export const RepoReaderConfigSchema = z.object({
   repos: z.array(RepoConfigSchema).default([]),
-  limits: LimitsConfigSchema.default({})
+  limits: LimitsConfigSchema.default({}),
+  tool_profile: z.enum(["core", "full"]).default("core").describe("Tool profile: 'core' (~30 tools) or 'full' (all tools).")
 }).passthrough();
 
 export type WritePolicyConfigDocument = z.input<typeof WritePolicyConfigSchema>;
 export type OperationsPolicyConfigDocument = z.input<typeof OperationsPolicyConfigSchema>;
+export type ActionsConfigDocument = z.input<typeof ActionsConfigSchema>;
 export type RepoConfig = {
   repo_id: string;
   display_name: string;
@@ -57,8 +77,10 @@ export type RepoConfig = {
   allow_non_git?: boolean;
   writes?: WritePolicyConfigDocument;
   operations?: OperationsPolicyConfigDocument;
+  actions?: ActionsConfigDocument;
 };
 export type RepoReaderConfig = {
   repos: RepoConfig[];
   limits: z.input<typeof LimitsConfigSchema>;
+  tool_profile: "core" | "full";
 };

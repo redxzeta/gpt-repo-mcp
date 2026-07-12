@@ -60,7 +60,7 @@ After ngrok is installed and connected to your account, use the normal quickstar
 ## Install
 
 ```bash
-git clone https://github.com/CAHN91/gpt-repo-mcp.git
+git clone https://github.com/redxzeta/gpt-repo-mcp.git
 cd gpt-repo-mcp
 npm install
 ```

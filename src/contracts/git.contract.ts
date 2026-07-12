@@ -40,3 +40,67 @@ export const GitDiffResultSchema = z.object({
   truncated: z.boolean(),
   warnings: z.array(z.string()).default([])
 });
+
+export const GitLogInputSchema = RepoInputSchema.extend({
+  ref: z.string().optional().describe("Optional ref, branch, or range to log (e.g. main, HEAD~5..HEAD)."),
+  paths: z.array(z.string()).optional().describe("Optional repo-relative paths to filter log."),
+  max_count: z.number().int().positive().optional().describe("Maximum commits to return. Defaults to 20, max 100."),
+  max_bytes: z.number().int().positive().optional().describe("Output size limit.")
+});
+
+export const GitLogResultSchema = z.object({
+  entries: z.array(z.object({
+    sha: z.string(),
+    short_sha: z.string(),
+    author: z.string(),
+    date: z.string(),
+    subject: z.string()
+  })),
+  truncated: z.boolean(),
+  total: z.number().int()
+});
+
+export const GitShowInputSchema = RepoInputSchema.extend({
+  commit_sha: z.string().min(1).describe("Full or short commit SHA to inspect."),
+  max_bytes: z.number().int().positive().optional().describe("Output size limit.")
+});
+
+export const GitShowResultSchema = z.object({
+  sha: z.string(),
+  content: z.string(),
+  truncated: z.boolean()
+});
+
+export const GitBlameInputSchema = RepoInputSchema.extend({
+  path: z.string().min(1).describe("Repo-relative file path to blame."),
+  ref: z.string().optional().describe("Optional ref or branch to blame against."),
+  max_bytes: z.number().int().positive().optional().describe("Output size limit.")
+});
+
+export const GitBlameResultSchema = z.object({
+  file: z.string(),
+  lines: z.array(z.object({
+    line: z.number().int(),
+    sha: z.string(),
+    author: z.string(),
+    date: z.string(),
+    content: z.string()
+  })),
+  truncated: z.boolean(),
+  total: z.number().int()
+});
+
+export const GitBranchesInputSchema = RepoInputSchema.extend({
+  include_remotes: z.boolean().optional().describe("Include remote-tracking branches. Defaults to false."),
+  max_count: z.number().int().positive().optional().describe("Maximum branches to return. Defaults to 50.")
+});
+
+export const GitBranchesResultSchema = z.object({
+  branches: z.array(z.object({
+    name: z.string(),
+    current: z.boolean(),
+    remote: z.string().optional()
+  })),
+  total: z.number().int(),
+  truncated: z.boolean()
+});

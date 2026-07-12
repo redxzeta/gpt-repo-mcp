@@ -40,6 +40,27 @@ export const HandoffResultSchema = z.object({
   warnings: z.array(z.string()).describe("Non-fatal warnings from rendering or write validation.")
 });
 
+export const HandoffListItemSchema = z.object({
+  path: z.string().describe("Repo-relative handoff file path."),
+  title: z.string().describe("Handoff title parsed from the markdown heading."),
+  branch: z.string().optional().describe("Git branch at time of handoff."),
+  head_sha: z.string().optional().describe("HEAD SHA at time of handoff."),
+  created_at: z.string().optional().describe("Timestamp parsed from filename.")
+});
+
+export const HandoffListInputSchema = RepoInputSchema.extend({
+  max_results: z.number().int().positive().optional().describe("Maximum number of handoffs to return. Defaults to 20.")
+});
+
+export const HandoffListResultSchema = z.object({
+  handoffs: z.array(HandoffListItemSchema).describe("Handoff files found under .chatgpt/handoffs/."),
+  current_path: z.string().optional().describe("Current handoff pointer path if it exists."),
+  total: z.number().int().describe("Total number of handoff files found."),
+  truncated: z.boolean().describe("Whether results were truncated by max_results.")
+});
+
 export type HandoffNextStep = z.infer<typeof HandoffNextStepSchema>;
 export type HandoffInput = z.infer<typeof HandoffInputSchema>;
 export type HandoffResult = z.infer<typeof HandoffResultSchema>;
+export type HandoffListInput = z.infer<typeof HandoffListInputSchema>;
+export type HandoffListResult = z.infer<typeof HandoffListResultSchema>;

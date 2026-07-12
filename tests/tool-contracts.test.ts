@@ -28,7 +28,7 @@ import { HandoffInputSchema, HandoffResultSchema } from "../src/contracts/handof
 import { LastWriteInputSchema, LastWriteResultSchema } from "../src/contracts/operation-receipt.contract.js";
 import { PolicyExplainInputSchema, PolicyExplainResultSchema } from "../src/contracts/policy.contract.js";
 import { RepoReaderConfigSchema } from "../src/config/schema.js";
-import { readOnlyAnnotations, writeAnnotations } from "../src/tools/annotations.js";
+import { externalReadOnlyAnnotations, externalWriteAnnotations, readOnlyAnnotations, writeAnnotations } from "../src/tools/annotations.js";
 import { toolCatalog } from "../src/tools/catalog.js";
 import { toolContracts } from "../src/tools/contracts.js";
 import { MUTATING_TOOL_NAMES, isMutatingToolName } from "../src/tools/mutating-tools.js";
@@ -47,40 +47,12 @@ function schemaDescription(schema: unknown): string | undefined {
 
 describe("tool catalog contracts", () => {
   test("all tools have required metadata and appropriate annotations", () => {
-    expect(toolCatalog.map((tool) => tool.name)).toEqual([
-      "repo_list_roots",
-      "repo_policy_explain",
-      "repo_last_write",
-      "repo_tree",
-      "repo_search",
-      "repo_fetch_file",
-      "repo_read_many",
-      "repo_git_status",
-      "repo_git_diff",
-      "repo_git_review",
-      "repo_git_stage",
-      "repo_git_unstage",
-      "repo_git_restore_paths",
-      "repo_git_commit",
-      "repo_write_stage",
-      "repo_write_unstage",
-      "repo_write_commit",
-      "repo_write_stage_commit",
-      "repo_write_recover",
-      "repo_cleanup_paths",
-      "repo_project_brief",
-      "repo_task_inventory",
-      "repo_decision_memory",
-      "repo_change_plan",
-      "repo_next_action",
-      "repo_plan_review",
-      "repo_prepare_codex_task",
-      "repo_write_codex_task",
-      "repo_codex_review",
-      "repo_write_file",
-      "repo_write_changes",
-      "repo_write_handoff"
-    ]);
+    const catalogNames = toolCatalog.map((tool) => tool.name);
+    const contractNames = Object.keys(toolContracts);
+
+    expect(catalogNames.sort()).toEqual(contractNames.sort());
+    expect(new Set(catalogNames).size).toBe(catalogNames.length);
+    expect(catalogNames.length).toBeGreaterThan(50);
 
     for (const tool of toolCatalog) {
       expect(tool.title.length).toBeGreaterThan(0);
@@ -88,9 +60,15 @@ describe("tool catalog contracts", () => {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
       if (isMutatingToolName(tool.name)) {
-        expect(tool.annotations).toEqual(writeAnnotations);
+        expect(
+          tool.annotations === writeAnnotations || tool.annotations === externalWriteAnnotations,
+          `${tool.name} should have write or external-write annotations`
+        ).toBe(true);
       } else {
-        expect(tool.annotations).toEqual(readOnlyAnnotations);
+        expect(
+          tool.annotations === readOnlyAnnotations || tool.annotations === externalReadOnlyAnnotations,
+          `${tool.name} should have read-only or external-read-only annotations`
+        ).toBe(true);
       }
       expect(tool.handler).toBeTypeOf("function");
     }
@@ -111,7 +89,18 @@ describe("tool catalog contracts", () => {
       "repo_write_commit",
       "repo_write_stage_commit",
       "repo_write_recover",
-      "repo_cleanup_paths"
+      "repo_cleanup_paths",
+      "repo_action_run",
+      "repo_action_cancel",
+      "repo_create_files",
+      "repo_apply_patch",
+      "repo_github_issue_create",
+      "repo_github_issue_comment",
+      "repo_github_pr_comment",
+      "repo_github_pr_create",
+      "repo_github_project_create",
+      "repo_github_project_item_add",
+      "repo_github_milestone_create"
     ]);
     const writeFile = toolCatalog.find((tool) => tool.name === "repo_write_file");
     const policyExplain = toolCatalog.find((tool) => tool.name === "repo_policy_explain");
@@ -196,14 +185,8 @@ describe("tool catalog contracts", () => {
     expect(writeFile?.description).not.toMatch(handoffTerms);
     expect(writeChanges?.description).not.toMatch(handoffTerms);
 
-    expect(writeHandoff?.description).toContain("skapa handoff");
-    expect(writeHandoff?.description).toContain("create handoff");
-    expect(writeHandoff?.description).toContain("skriv handoff");
-    expect(writeHandoff?.description).toContain("session handoff");
-    expect(writeHandoff?.description).toContain("resume note");
     expect(writeHandoff?.description).toContain("local-only ChatGPT handoff");
-    expect(writeHandoff?.description).toContain("current.local.md");
-    expect(writeHandoff?.description).toContain(".chatgpt/handoffs/*.local.md");
+    expect(writeHandoff?.description).toContain("session resume");
   });
 
   test("receipt files are ignored by git", () => {
@@ -688,11 +671,10 @@ describe("tool catalog contracts", () => {
     expect(missingFileFields.success).toBe(false);
   });
 
-  test("repo_git_diff advertises minimal first-call guidance", () => {
+  test("repo_git_diff input schema provides first-call guidance", () => {
     const gitDiff = toolCatalog.find((tool) => tool.name === "repo_git_diff");
 
-    expect(gitDiff?.description).toContain("Default first call should pass only repo_id");
-    expect(gitDiff?.description).toContain("Do not include staged, unstaged, paths, max_bytes, or context_lines on the first pass");
+    expect(gitDiff?.description).toContain("git diff");
     expect(schemaDescription(gitDiff!.inputSchema.shape.max_bytes)).toContain("Second-pass refinement");
     expect(schemaDescription(gitDiff!.inputSchema.shape.context_lines)).toContain("Omit on the first diff call");
   });
@@ -724,7 +706,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks which approved repositories are available. Does not read file contents.",
+          "description": "Use this when the user asks which approved repositories are available.",
           "inputKeys": [],
           "name": "repo_list_roots",
           "outputKeys": [
@@ -739,7 +721,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when a read, write, or cleanup policy question is blocked or the user asks what ChatGPT can access in a repo. Explains effective read/write/cleanup policy, local git operation toggles, matched globs, block reasons, and next steps without reading or mutating files.",
+          "description": "Use this when a read, write, or cleanup policy question is blocked or the user asks what can be accessed in a repo.",
           "inputKeys": [
             "operation",
             "path",
@@ -768,7 +750,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks what the last write operation changed or how to continue review/recovery after a previous write. Reads safe local receipt metadata only and never mutates files or git.",
+          "description": "Use this when the user asks what the last write operation changed or how to resume after a previous write.",
           "inputKeys": [
             "repo_id",
           ],
@@ -789,7 +771,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to inspect repository structure or locate likely files by directory. Do not use this when the user asks to read file contents.",
+          "description": "Use this when the user asks to inspect repository structure or locate files by directory.",
           "inputKeys": [
             "cursor",
             "include_dependencies",
@@ -817,7 +799,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to find code, inspect usages, perform a bughunt, or locate relevant files before reading them. Prefer this before repo_read_many.",
+          "description": "Use this when the user asks to find code, inspect usages, or locate relevant files by text content.",
           "inputKeys": [
             "context_lines",
             "cursor",
@@ -846,7 +828,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user names a specific file or after repo_tree/repo_search identifies a relevant file. Supports line ranges. Do not use for broad repository review.",
+          "description": "Use this when the user names a specific file to read. Supports line ranges.",
           "inputKeys": [
             "end_line",
             "max_bytes",
@@ -877,7 +859,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to read a bounded set of explicit files or glob-matched files. Do not use this to read an entire repository.",
+          "description": "Use this when the user asks to read a bounded set of explicit files or glob-matched files.",
           "inputKeys": [
             "cursor",
             "exclude_globs",
@@ -906,7 +888,535 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks for git status, branch, dirty files, or changed file counts. Do not use this to inspect file contents.",
+          "description": "Use this when the user wants to understand a codebase through imports, exports, classes, types, and functions.",
+          "inputKeys": [
+            "exclude_globs",
+            "include_globs",
+            "max_files",
+            "max_symbols",
+            "paths",
+            "repo_id",
+          ],
+          "name": "repo_symbol_outline",
+          "outputKeys": [
+            "counts",
+            "files",
+            "truncated",
+            "warnings",
+          ],
+          "title": "Outline repository symbols",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks what imports what, what depends on a file, or how modules are connected.",
+          "inputKeys": [
+            "direction",
+            "include_globs",
+            "max_edges",
+            "paths",
+            "repo_id",
+          ],
+          "name": "repo_dependency_map",
+          "outputKeys": [
+            "counts",
+            "edges",
+            "external_packages",
+            "hotspots",
+            "truncated",
+            "unresolved_imports",
+            "warnings",
+          ],
+          "title": "Map repository dependencies",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks what checks to run or how to validate a change. Returns advisory commands only.",
+          "inputKeys": [
+            "changed_paths",
+            "goal",
+            "repo_id",
+          ],
+          "name": "repo_validation_plan",
+          "outputKeys": [
+            "affected_areas",
+            "commands",
+            "package_manager",
+            "warnings",
+          ],
+          "title": "Plan repository validation",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks how to work in a repo or what project-specific rules apply.",
+          "inputKeys": [
+            "focus",
+            "repo_id",
+          ],
+          "name": "repo_agent_context",
+          "outputKeys": [
+            "guidance",
+            "read_first",
+            "scripts",
+            "warnings",
+          ],
+          "title": "Read repository agent context",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to view GitHub issues for an approved repo.",
+          "inputKeys": [
+            "labels",
+            "max_results",
+            "query",
+            "repo_id",
+            "state",
+          ],
+          "name": "repo_github_issues",
+          "outputKeys": [
+            "count",
+            "issues",
+            "repository",
+            "warnings",
+          ],
+          "title": "View GitHub issues",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to create a GitHub issue in an approved repo.",
+          "inputKeys": [
+            "assignees",
+            "body",
+            "dry_run",
+            "labels",
+            "milestone",
+            "repo_id",
+            "title",
+          ],
+          "name": "repo_github_issue_create",
+          "outputKeys": [
+            "dry_run",
+            "issue_number",
+            "repository",
+            "title",
+            "url",
+            "warnings",
+          ],
+          "title": "Create GitHub issue",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to comment on a GitHub issue in an approved repo.",
+          "inputKeys": [
+            "body",
+            "dry_run",
+            "issue_number",
+            "repo_id",
+          ],
+          "name": "repo_github_issue_comment",
+          "outputKeys": [
+            "dry_run",
+            "repository",
+            "target_number",
+            "warnings",
+          ],
+          "title": "Comment on GitHub issue",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to comment on a GitHub pull request in an approved repo.",
+          "inputKeys": [
+            "body",
+            "dry_run",
+            "pr_number",
+            "repo_id",
+          ],
+          "name": "repo_github_pr_comment",
+          "outputKeys": [
+            "dry_run",
+            "repository",
+            "target_number",
+            "warnings",
+          ],
+          "title": "Comment on GitHub pull request",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to read full details of a specific GitHub issue.",
+          "inputKeys": [
+            "issue_number",
+            "repo_id",
+          ],
+          "name": "repo_github_issue_read",
+          "outputKeys": [
+            "assignees",
+            "body",
+            "comments_count",
+            "labels",
+            "milestone",
+            "number",
+            "repository",
+            "state",
+            "title",
+            "url",
+            "warnings",
+          ],
+          "title": "Read GitHub issue details",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to view pull requests for an approved repo.",
+          "inputKeys": [
+            "max_results",
+            "repo_id",
+            "state",
+          ],
+          "name": "repo_github_pr_list",
+          "outputKeys": [
+            "count",
+            "prs",
+            "repository",
+            "warnings",
+          ],
+          "title": "List GitHub pull requests",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to read full details of a specific GitHub pull request.",
+          "inputKeys": [
+            "pr_number",
+            "repo_id",
+          ],
+          "name": "repo_github_pr_read",
+          "outputKeys": [
+            "author",
+            "base",
+            "body",
+            "head",
+            "labels",
+            "mergeable",
+            "number",
+            "repository",
+            "reviewers",
+            "state",
+            "title",
+            "url",
+            "warnings",
+          ],
+          "title": "Read GitHub pull request details",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to create a GitHub pull request in an approved repo.",
+          "inputKeys": [
+            "assignees",
+            "base",
+            "body",
+            "draft",
+            "dry_run",
+            "head",
+            "labels",
+            "repo_id",
+            "reviewers",
+            "title",
+          ],
+          "name": "repo_github_pr_create",
+          "outputKeys": [
+            "dry_run",
+            "pr_number",
+            "repository",
+            "status",
+            "url",
+            "warnings",
+          ],
+          "title": "Create GitHub pull request",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to check CI status or test results for a pull request.",
+          "inputKeys": [
+            "pr_number",
+            "repo_id",
+          ],
+          "name": "repo_github_pr_checks",
+          "outputKeys": [
+            "checks",
+            "overall_status",
+            "repository",
+            "warnings",
+          ],
+          "title": "Get GitHub PR check status",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to view GitHub projects for the repository owner.",
+          "inputKeys": [
+            "max_results",
+            "repo_id",
+            "state",
+          ],
+          "name": "repo_github_project_list",
+          "outputKeys": [
+            "count",
+            "owner",
+            "projects",
+            "repository",
+            "warnings",
+          ],
+          "title": "List GitHub projects",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to read full details of a specific GitHub project.",
+          "inputKeys": [
+            "project_number",
+            "repo_id",
+          ],
+          "name": "repo_github_project_read",
+          "outputKeys": [
+            "closed",
+            "description",
+            "number",
+            "owner",
+            "public",
+            "repository",
+            "short_description",
+            "state",
+            "title",
+            "url",
+            "warning",
+            "warnings",
+          ],
+          "title": "Read GitHub project details",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to create a GitHub project for the repository owner.",
+          "inputKeys": [
+            "body",
+            "dry_run",
+            "private",
+            "repo_id",
+            "title",
+          ],
+          "name": "repo_github_project_create",
+          "outputKeys": [
+            "dry_run",
+            "owner",
+            "project_number",
+            "repository",
+            "title",
+            "url",
+            "warnings",
+          ],
+          "title": "Create GitHub project",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to view items in a GitHub project.",
+          "inputKeys": [
+            "max_results",
+            "project_number",
+            "repo_id",
+          ],
+          "name": "repo_github_project_item_list",
+          "outputKeys": [
+            "count",
+            "items",
+            "owner",
+            "project_number",
+            "repository",
+            "warnings",
+          ],
+          "title": "List GitHub project items",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to add an issue or pull request to a GitHub project.",
+          "inputKeys": [
+            "dry_run",
+            "project_number",
+            "repo_id",
+            "url",
+          ],
+          "name": "repo_github_project_item_add",
+          "outputKeys": [
+            "dry_run",
+            "item_url",
+            "owner",
+            "project_number",
+            "repository",
+            "warnings",
+          ],
+          "title": "Add item to GitHub project",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to view GitHub milestones for an approved repo.",
+          "inputKeys": [
+            "max_results",
+            "repo_id",
+            "state",
+          ],
+          "name": "repo_github_milestone_list",
+          "outputKeys": [
+            "count",
+            "milestones",
+            "repository",
+            "warnings",
+          ],
+          "title": "List GitHub milestones",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": true,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to read full details of a specific GitHub milestone.",
+          "inputKeys": [
+            "milestone_number",
+            "repo_id",
+          ],
+          "name": "repo_github_milestone_read",
+          "outputKeys": [
+            "closed_issues",
+            "description",
+            "due_on",
+            "number",
+            "open_issues",
+            "repository",
+            "state",
+            "title",
+            "url",
+            "warnings",
+          ],
+          "title": "Read GitHub milestone details",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to create a GitHub milestone in an approved repo.",
+          "inputKeys": [
+            "description",
+            "dry_run",
+            "due_on",
+            "repo_id",
+            "title",
+          ],
+          "name": "repo_github_milestone_create",
+          "outputKeys": [
+            "dry_run",
+            "milestone_number",
+            "repository",
+            "title",
+            "url",
+            "warnings",
+          ],
+          "title": "Create GitHub milestone",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks for git status, branch, dirty files, or changed file counts.",
           "inputKeys": [
             "repo_id",
           ],
@@ -927,7 +1437,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to review changes or inspect a git diff. Default first call should pass only repo_id. Do not include staged, unstaged, paths, max_bytes, or context_lines on the first pass. Use optional filters only after the default diff is truncated, too broad, or the user asks for a specific comparison.",
+          "description": "Use this when the user asks to review changes or inspect a git diff.",
           "inputKeys": [
             "base",
             "compare",
@@ -957,7 +1467,95 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to review current git changes, recover bad write-tool edits, clean up generated artifacts, prepare staging, or plan a local commit without mutating anything. Workflow hub that returns status, diff summary, warnings, and ready-to-run composite payloads for repo_write_stage_commit and repo_write_recover plus low-level fallback payloads.",
+          "description": "Use this when the user asks for commit history, git log, or recent changes.",
+          "inputKeys": [
+            "max_bytes",
+            "max_count",
+            "paths",
+            "ref",
+            "repo_id",
+          ],
+          "name": "repo_git_log",
+          "outputKeys": [
+            "entries",
+            "total",
+            "truncated",
+          ],
+          "title": "Read git log",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to see a specific commit's details or content.",
+          "inputKeys": [
+            "commit_sha",
+            "max_bytes",
+            "repo_id",
+          ],
+          "name": "repo_git_show",
+          "outputKeys": [
+            "content",
+            "sha",
+            "truncated",
+          ],
+          "title": "Show git commit",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks who changed a line, git blame, or line-level history.",
+          "inputKeys": [
+            "max_bytes",
+            "path",
+            "ref",
+            "repo_id",
+          ],
+          "name": "repo_git_blame",
+          "outputKeys": [
+            "file",
+            "lines",
+            "total",
+            "truncated",
+          ],
+          "title": "Read git blame",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks about branches, which branch is current, or branch listing.",
+          "inputKeys": [
+            "include_remotes",
+            "max_count",
+            "repo_id",
+          ],
+          "name": "repo_git_branches",
+          "outputKeys": [
+            "branches",
+            "total",
+            "truncated",
+          ],
+          "title": "List git branches",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user wants to review current git changes and get ready-to-run payloads for commit or recovery.",
           "inputKeys": [
             "max_files",
             "mode",
@@ -983,7 +1581,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when compatibility with the git-prefixed staging alias is needed; prefer repo_write_stage for ChatGPT workflows. Stages explicit repo-relative paths only, requires user approval and expected HEAD, and never runs shell commands.",
+          "description": "Use this when compatibility with the git-prefixed staging alias is needed.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1009,7 +1607,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when compatibility with the git-prefixed unstaging alias is needed; prefer repo_write_unstage for ChatGPT workflows. Unstages explicit repo-relative paths only, requires user approval and expected HEAD, and never runs shell commands.",
+          "description": "Use this when compatibility with the git-prefixed unstaging alias is needed.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1035,7 +1633,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to recover bad unstaged worktree changes for reviewed explicit repo-relative paths. Runs only git restore -- <paths>, requires expected HEAD, does not unstage, stage, commit, reset, checkout, or run shell commands.",
+          "description": "Use this when the user asks to recover unstaged worktree changes for specific paths.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1061,7 +1659,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when compatibility with the git-prefixed commit alias is needed; prefer repo_write_commit for ChatGPT workflows. Creates a local-only commit from exact staged paths, requires user approval and expected HEAD, does not push, and never runs shell commands.",
+          "description": "Use this when compatibility with the git-prefixed commit alias is needed.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1089,7 +1687,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to stage reviewed repo-relative paths separately or granular control is needed; prefer repo_write_stage_commit after repo_git_review for normal reviewed commits. Requires user approval, expected HEAD, explicit paths, and never runs shell commands.",
+          "description": "Use this when the user asks to stage reviewed repo-relative paths.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1115,7 +1713,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to unstage reviewed repo-relative paths separately or granular recovery control is needed; prefer repo_write_recover after repo_git_review for normal reviewed recovery. Requires user approval, expected HEAD, explicit paths, and never runs shell commands.",
+          "description": "Use this when the user asks to unstage reviewed repo-relative paths.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1141,7 +1739,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to create a local-only commit from already staged reviewed paths, or staged-only flow requires a commit without staging; prefer repo_write_stage_commit after repo_git_review for normal reviewed commits. Requires user approval, exact staged path verification, expected HEAD, does not push, and never runs shell commands.",
+          "description": "Use this when the user asks to create a local-only commit from staged paths.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1169,7 +1767,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user has reviewed repo_git_review output and explicitly approves staging and committing exact repo-relative paths in one local-only operation. Requires expected HEAD, explicit paths, exact staged path verification, does not push, and never runs shell commands.",
+          "description": "Use this when the user approves staging and committing exact paths after reviewing git changes.",
           "inputKeys": [
             "dry_run",
             "expected_head_sha",
@@ -1200,7 +1798,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user has reviewed repo_git_review output and explicitly approves recovering exact repo-relative paths in one operation. Can unstage, restore tracked worktree paths, and clean configured generated artifacts; requires expected HEAD, explicit paths, does not reset, checkout, stash, clean, commit, push, or run shell commands.",
+          "description": "Use this when the user approves recovering exact paths after reviewing git changes.",
           "inputKeys": [
             "cleanup_paths",
             "dry_run",
@@ -1232,7 +1830,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to delete generated repo-local artifacts or local ChatGPT artifacts separately, or granular cleanup control is needed; prefer repo_write_recover after repo_git_review for normal reviewed recovery. Requires user approval, explicit paths, refuses tracked files, and never runs shell commands or git clean.",
+          "description": "Use this when the user asks to delete generated artifacts or local ChatGPT artifacts.",
           "inputKeys": [
             "dry_run",
             "paths",
@@ -1256,7 +1854,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to understand, onboard into, plan work for, summarize, or start a daily planning session for an approved repository. Prefer this as the first planning tool because it returns bounded project signals without reading the whole repo.",
+          "description": "Use this when the user asks to understand, onboard, or plan work for a repository.",
           "inputKeys": [
             "include",
             "repo_id",
@@ -1283,7 +1881,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks to find repo-local TODOs, FIXMEs, HACKs, roadmap notes, markdown checklist items, backlog candidates, or next tasks. Returns file and line grounded backlog signals for planning.",
+          "description": "Use this when the user asks to find TODOs, FIXMEs, roadmap items, or backlog candidates.",
           "inputKeys": [
             "cursor",
             "exclude_globs",
@@ -1312,7 +1910,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks about project memory, architecture decisions, conventions, patterns, rationale, or why the project is structured a certain way. Returns bounded evidence-grounded decisions, conventions, and gaps from repo documentation and package metadata.",
+          "description": "Use this when the user asks about architecture decisions, conventions, or project rationale.",
           "inputKeys": [
             "include_sources",
             "repo_id",
@@ -1333,7 +1931,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks how to implement, refactor, debug, fix, or add a feature without writing files. Returns an evidence-grounded implementation plan, likely files, risks, tests, and open questions.",
+          "description": "Use this when the user asks how to implement, refactor, or fix something without writing files.",
           "inputKeys": [
             "goal",
             "include_globs",
@@ -1361,7 +1959,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks what to do next, what to prioritize, whether work is ready to ship, what to clean up, or how to choose focused solo-dev work. Returns advisory next actions from repo status, project brief, and task inventory.",
+          "description": "Use this when the user asks what to do next, what to prioritize, or whether work is ready to ship.",
           "inputKeys": [
             "horizon",
             "mode",
@@ -1386,7 +1984,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user asks for broad or ambiguous repository review. It estimates scope and suggests whether to ask a clarifying question before reading many files; for onboarding or daily planning prefer repo_project_brief first.",
+          "description": "Use this when the user asks for broad or ambiguous repository review.",
           "inputKeys": [
             "prompt",
           ],
@@ -1408,7 +2006,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when the user explicitly asks for a Codex prompt, Codex task, or delegation to Codex and wants the prompt returned in chat for review/copying. Does not write files or implement the change.",
+          "description": "Use this when the user asks for a Codex prompt returned in chat for review.",
           "inputKeys": [
             "acceptance_criteria",
             "allowed_paths",
@@ -1444,7 +2042,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to write a Codex prompt/task/run into the repo for Codex to execute later. Writes only .chatgpt/codex-runs/<run_id>/PROMPT.md and run.json through repo write policy; does not implement, stage, commit, push, or run Codex.",
+          "description": "Use this when the user asks to write a Codex prompt into the repo for later execution.",
           "inputKeys": [
             "acceptance_criteria",
             "allowed_paths",
@@ -1484,7 +2082,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": true,
           },
-          "description": "Use this when Codex has finished or the user asks to review a repo-local Codex run. Reads .chatgpt/codex-runs/<run_id>/RESULT.md and git diff review state without mutating files or git.",
+          "description": "Use this when the user asks to review a repo-local Codex run result.",
           "inputKeys": [
             "max_files",
             "repo_id",
@@ -1512,7 +2110,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to write or precisely edit one allowed repository file. Primary low-friction single-file writer/editor for docs, notes, prompts, and focused code edits; requires user approval, repo opt-in, and never runs shell, git, or Codex.",
+          "description": "Use this when the user asks to write or edit one allowed repository file.",
           "inputKeys": [
             "action",
             "content",
@@ -1548,7 +2146,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user explicitly asks to apply a cohesive multi-file edit pack to allowed repository files. Primary low-friction multi-file writer/editor for full-file writes and exact-match edits; requires user approval, repo opt-in, and never runs shell, git, stage, commit, or restore.",
+          "description": "Use this when the user asks to apply a multi-file edit pack to allowed repository files.",
           "inputKeys": [
             "changes",
             "dry_run",
@@ -1576,7 +2174,7 @@ describe("tool catalog contracts", () => {
             "openWorldHint": false,
             "readOnlyHint": false,
           },
-          "description": "Use this when the user asks for a local-only ChatGPT handoff: skapa handoff, create handoff, skriv handoff, session handoff, resume note, fortsättningsanteckning, ny chatt context, or överlämning till nästa chatt. Creates .chatgpt/handoffs/*.local.md and updates current.local.md; never stages, commits, pushes, resets, checks out, or runs shell commands.",
+          "description": "Use this when the user asks to create a local-only ChatGPT handoff for session resume.",
           "inputKeys": [
             "completed_work",
             "constraints",
@@ -1609,6 +2207,269 @@ describe("tool catalog contracts", () => {
             "warnings",
           ],
           "title": "Create ChatGPT handoff",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to see previous handoffs or list session resume notes.",
+          "inputKeys": [
+            "max_results",
+            "repo_id",
+          ],
+          "name": "repo_handoff_list",
+          "outputKeys": [
+            "current_path",
+            "handoffs",
+            "total",
+            "truncated",
+          ],
+          "title": "List session handoffs",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks what actions are available or what commands can be run.",
+          "inputKeys": [
+            "repo_id",
+          ],
+          "name": "repo_action_list",
+          "outputKeys": [
+            "actions",
+            "enabled",
+            "warnings",
+          ],
+          "title": "List configured actions",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks for details about a specific configured action.",
+          "inputKeys": [
+            "name",
+            "repo_id",
+          ],
+          "name": "repo_action_describe",
+          "outputKeys": [
+            "args",
+            "command",
+            "mutates_files",
+            "name",
+            "timeout_ms",
+            "warnings",
+          ],
+          "title": "Describe configured action",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user explicitly asks to run a configured action.",
+          "inputKeys": [
+            "name",
+            "reason",
+            "repo_id",
+          ],
+          "name": "repo_action_run",
+          "outputKeys": [
+            "action",
+            "changed_paths",
+            "completed_at",
+            "duration_ms",
+            "exit_code",
+            "output_truncated",
+            "run_id",
+            "started_at",
+            "status",
+            "stderr_excerpt",
+            "stdout_excerpt",
+            "warnings",
+            "worktree_after",
+            "worktree_before",
+          ],
+          "title": "Run configured action",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks about the status of a previous action run.",
+          "inputKeys": [
+            "repo_id",
+            "run_id",
+          ],
+          "name": "repo_action_status",
+          "outputKeys": [
+            "action",
+            "changed_paths",
+            "completed_at",
+            "duration_ms",
+            "exit_code",
+            "output_truncated",
+            "run_id",
+            "started_at",
+            "status",
+            "stderr_excerpt",
+            "stdout_excerpt",
+            "warnings",
+            "worktree_after",
+            "worktree_before",
+          ],
+          "title": "Read action run status",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to see stdout/stderr from a previous action run.",
+          "inputKeys": [
+            "max_bytes",
+            "repo_id",
+            "run_id",
+          ],
+          "name": "repo_action_logs",
+          "outputKeys": [
+            "run_id",
+            "stderr",
+            "stderr_truncated",
+            "stdout",
+            "stdout_truncated",
+            "warnings",
+          ],
+          "title": "Read action run logs",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to cancel a running or queued action.",
+          "inputKeys": [
+            "repo_id",
+            "run_id",
+          ],
+          "name": "repo_action_cancel",
+          "outputKeys": [
+            "action",
+            "run_id",
+            "status",
+            "warnings",
+          ],
+          "title": "Cancel running action",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks to see recent action runs or execution history.",
+          "inputKeys": [
+            "max_results",
+            "repo_id",
+          ],
+          "name": "repo_action_recent",
+          "outputKeys": [
+            "count",
+            "runs",
+            "warnings",
+          ],
+          "title": "List recent action runs",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to create new files without overwriting existing ones.",
+          "inputKeys": [
+            "dry_run",
+            "expected_head_sha",
+            "files",
+            "reason",
+            "repo_id",
+          ],
+          "name": "repo_create_files",
+          "outputKeys": [
+            "created_directories",
+            "created_files",
+            "head_sha",
+            "skipped",
+            "status",
+            "warnings",
+          ],
+          "title": "Create new files",
+        },
+        {
+          "annotations": {
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": false,
+            "readOnlyHint": false,
+          },
+          "description": "Use this when the user asks to apply a unified diff patch to the repository.",
+          "inputKeys": [
+            "dry_run",
+            "expected_files",
+            "expected_head_sha",
+            "patch",
+            "reason",
+            "repo_id",
+          ],
+          "name": "repo_apply_patch",
+          "outputKeys": [
+            "applied_files",
+            "diff_summary",
+            "rejected_hunks",
+            "status",
+            "warnings",
+          ],
+          "title": "Apply unified diff patch",
+        },
+        {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+            "readOnlyHint": true,
+          },
+          "description": "Use this when the user asks what tools are available, current tool profile, or active policies.",
+          "inputKeys": [
+            "repo_id",
+          ],
+          "name": "repo_manifest",
+          "outputKeys": [
+            "policies",
+            "profile",
+            "tool_count",
+            "tools",
+          ],
+          "title": "Tool manifest and policies",
         },
       ]
     `);

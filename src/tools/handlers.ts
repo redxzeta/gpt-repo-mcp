@@ -1,11 +1,12 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { readdir, readFile } from "node:fs/promises";
 import { z } from "zod";
 import { PathSandbox } from "../services/path-sandbox.js";
 import { CleanupService } from "../services/cleanup-service.js";
 import { RepoTreeService } from "../services/repo-tree-service.js";
 import { SearchService } from "../services/search-service.js";
 import { FileReader } from "../services/file-reader.js";
-import { GitHubIssuesService } from "../services/github-issues-service.js";
+import { GitHubService } from "../services/github-service.js";
 import { GitService } from "../services/git-service.js";
 import { GitReviewService } from "../services/git-review-service.js";
 import { GitOperationsService } from "../services/git-operations-service.js";
@@ -26,6 +27,8 @@ import { WriteChangesService } from "../services/write-changes-service.js";
 import { WritePolicy } from "../services/write-policy.js";
 import { OperationReceiptService } from "../services/operation-receipt-service.js";
 import { RepoIntelligenceService } from "../services/repo-intelligence-service.js";
+import { ActionService } from "../services/action-service.js";
+import { FileCreateService, PatchService } from "../services/file-create-service.js";
 import { createErrorEnvelope, createSuccessEnvelope } from "../runtime/result-envelope.js";
 import { toRepoReaderError } from "../runtime/errors.js";
 import { audit } from "../runtime/telemetry.js";
@@ -33,7 +36,7 @@ import type { RuntimeContext } from "../runtime/context.js";
 import type { SearchOptions } from "../services/search-service.js";
 import type { FetchFileOptions } from "../services/file-reader.js";
 import type { TreeOptions } from "../services/repo-tree-service.js";
-import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssuesInput, GitHubPullRequestCommentInput } from "../contracts/github.contract.js";
+import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssuesInput, GitHubIssueReadInput, GitHubMilestoneCreateInput, GitHubMilestoneListInput, GitHubMilestoneReadInput, GitHubProjectCreateInput, GitHubProjectItemAddInput, GitHubProjectItemListInput, GitHubProjectListInput, GitHubProjectReadInput, GitHubPullRequestCommentInput, GitHubPrChecksInput, GitHubPrCreateInput, GitHubPrListInput, GitHubPrReadInput } from "../contracts/github.contract.js";
 import type { ProjectBriefInput } from "../contracts/project.contract.js";
 import type { AgentContextInput, DependencyMapInput, SymbolOutlineInput, ValidationPlanInput } from "../contracts/repo-intelligence.contract.js";
 import type { TaskInventoryInput } from "../contracts/task.contract.js";
@@ -45,9 +48,18 @@ import type { LastWriteInput } from "../contracts/operation-receipt.contract.js"
 import type { PolicyExplainInput } from "../contracts/policy.contract.js";
 import type { WriteChangesInput, WriteFileInput } from "../contracts/write.contract.js";
 import type { GitCommitInput, GitRecoverInput, GitRestorePathsInput, GitStageCommitInput, GitStageInput, GitUnstageInput } from "../contracts/git-operations.contract.js";
+
+type GitLogInput = RepoInput & { ref?: string; paths?: string[]; max_count?: number; max_bytes?: number };
+type GitShowInput = RepoInput & { commit_sha: string; max_bytes?: number };
+type GitBlameInput = RepoInput & { path: string; ref?: string; max_bytes?: number };
+type GitBranchesInput = RepoInput & { include_remotes?: boolean; max_count?: number };
 import type { GitReviewInput } from "../contracts/git-review.contract.js";
 import type { CleanupPathsInput } from "../contracts/cleanup.contract.js";
-import type { HandoffInput } from "../contracts/handoff.contract.js";
+import type { HandoffInput, HandoffListInput, HandoffListResult } from "../contracts/handoff.contract.js";
+import type { ActionCancelInput, ActionDescribeInput, ActionListInput, ActionLogsInput, ActionRecentInput, ActionRunInput, ActionStatusInput } from "../contracts/actions.contract.js";
+import type { ManifestInput, ManifestResult } from "../contracts/manifest.contract.js";
+import { toolCatalog } from "./catalog.js";
+import type { ApplyPatchInput, CreateFilesInput } from "../contracts/file-operations.contract.js";
 
 type RepoInput = { repo_id: string };
 type ReadManyInput = RepoInput & {
@@ -71,8 +83,15 @@ type GitDiffInput = RepoInput & {
 
 export type ToolHandler = (input: unknown, context: RuntimeContext) => Promise<CallToolResult>;
 
+const HIDE_ROOT_PATHS = process.env.GPT_REPO_HIDE_ROOT_PATHS === "true";
+
 export const listRootsHandler: ToolHandler = async (_input, context) => {
-  const repos = context.registry.list();
+  const repos = context.registry.list().map((repo) => {
+    if (HIDE_ROOT_PATHS) {
+      return { repo_id: repo.repo_id, display_name: repo.display_name };
+    }
+    return repo;
+  });
   return createSuccessEnvelope({ repos }, `${repos.length} approved repositories available.`);
 };
 
@@ -112,8 +131,15 @@ export const searchHandler: ToolHandler = async (input, context) => safeTool<Sea
 });
 
 export const fetchFileHandler: ToolHandler = async (input, context) => safeTool<FetchFileOptions & RepoInput>("repo_fetch_file", input, context, async (args) => {
+  const cacheKey = `file:${args.repo_id}:${args.path}`;
+  const cached = context.cache.get(cacheKey);
+  if (cached) {
+    audit({ tool: "repo_fetch_file", repo_id: args.repo_id, paths: [args.path], counts: { bytes: 0 }, truncated: false, warnings: [] });
+    return createSuccessEnvelope(cached, `Read ${args.path} (cached).`);
+  }
   const repo = context.registry.get(args.repo_id);
   const result = await new FileReader(new PathSandbox(repo.root)).read(args);
+  context.cache.set(cacheKey, result, 60_000);
   audit({ tool: "repo_fetch_file", repo_id: args.repo_id, paths: [result.path], counts: { bytes: result.size_bytes }, truncated: result.truncated, warnings: result.warnings });
   return createSuccessEnvelope(result, `Read ${result.path}.`, { warnings: result.warnings });
 });
@@ -156,14 +182,14 @@ export const agentContextHandler: ToolHandler = async (input, context) => safeTo
 
 export const githubIssuesHandler: ToolHandler = async (input, context) => safeTool<GitHubIssuesInput>("repo_github_issues", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
-  const result = await new GitHubIssuesService(repo.root).listIssues(args);
+  const result = await new GitHubService(repo.root).listIssues(args);
   audit({ tool: "repo_github_issues", repo_id: args.repo_id, counts: { issues: result.count }, warnings: result.warnings });
   return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} GitHub issues for ${result.repository}.` : "No GitHub repository was detected.");
 });
 
 export const githubIssueCreateHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueCreateInput>("repo_github_issue_create", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
-  const result = await new GitHubIssuesService(repo.root).createIssue(args);
+  const result = await new GitHubService(repo.root).createIssue(args);
   audit({ tool: "repo_github_issue_create", repo_id: args.repo_id, warnings: result.warnings });
   return createSuccessEnvelope(
     result,
@@ -177,16 +203,133 @@ export const githubIssueCreateHandler: ToolHandler = async (input, context) => s
 
 export const githubIssueCommentHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueCommentInput>("repo_github_issue_comment", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
-  const result = await new GitHubIssuesService(repo.root).commentOnIssue(args);
+  const result = await new GitHubService(repo.root).commentOnIssue(args);
   audit({ tool: "repo_github_issue_comment", repo_id: args.repo_id, warnings: result.warnings });
   return createSuccessEnvelope(result, result.dry_run ? `Dry run checked issue comment on #${args.issue_number}.` : `Commented on issue #${args.issue_number}.`);
 });
 
 export const githubPrCommentHandler: ToolHandler = async (input, context) => safeTool<GitHubPullRequestCommentInput>("repo_github_pr_comment", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
-  const result = await new GitHubIssuesService(repo.root).commentOnPullRequest(args);
+  const result = await new GitHubService(repo.root).commentOnPullRequest(args);
   audit({ tool: "repo_github_pr_comment", repo_id: args.repo_id, warnings: result.warnings });
   return createSuccessEnvelope(result, result.dry_run ? `Dry run checked PR comment on #${args.pr_number}.` : `Commented on PR #${args.pr_number}.`);
+});
+
+export const githubIssueReadHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueReadInput>("repo_github_issue_read", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).readIssue(args);
+  audit({ tool: "repo_github_issue_read", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Read issue #${result.number}: ${result.title}.`);
+});
+
+export const githubPrListHandler: ToolHandler = async (input, context) => safeTool<GitHubPrListInput>("repo_github_pr_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).listPullRequests(args);
+  audit({ tool: "repo_github_pr_list", repo_id: args.repo_id, counts: { prs: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} pull requests for ${result.repository}.` : "No GitHub repository was detected.");
+});
+
+export const githubPrReadHandler: ToolHandler = async (input, context) => safeTool<GitHubPrReadInput>("repo_github_pr_read", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).readPullRequest(args);
+  audit({ tool: "repo_github_pr_read", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Read PR #${result.number}: ${result.title}.`);
+});
+
+export const githubPrCreateHandler: ToolHandler = async (input, context) => safeTool<GitHubPrCreateInput>("repo_github_pr_create", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).createPullRequest(args);
+  audit({ tool: "repo_github_pr_create", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(
+    result,
+    result.dry_run
+      ? `Dry run checked PR creation.`
+      : result.url
+        ? `Created PR ${result.url}.`
+        : `PR creation did not complete.`
+  );
+});
+
+export const githubPrChecksHandler: ToolHandler = async (input, context) => safeTool<GitHubPrChecksInput>("repo_github_pr_checks", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).prChecks(args);
+  audit({ tool: "repo_github_pr_checks", repo_id: args.repo_id, counts: { checks: result.checks.length }, warnings: result.warnings });
+  return createSuccessEnvelope(result, `PR #${args.pr_number} checks: ${result.overall_status}.`);
+});
+
+export const githubProjectListHandler: ToolHandler = async (input, context) => safeTool<GitHubProjectListInput>("repo_github_project_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).listProjects(args);
+  audit({ tool: "repo_github_project_list", repo_id: args.repo_id, counts: { projects: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} GitHub projects for ${result.owner}.` : "No GitHub repository was detected.");
+});
+
+export const githubProjectReadHandler: ToolHandler = async (input, context) => safeTool<GitHubProjectReadInput>("repo_github_project_read", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).readProject(args);
+  audit({ tool: "repo_github_project_read", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Read project #${result.number}: ${result.title}.`);
+});
+
+export const githubProjectCreateHandler: ToolHandler = async (input, context) => safeTool<GitHubProjectCreateInput>("repo_github_project_create", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).createProject(args);
+  audit({ tool: "repo_github_project_create", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(
+    result,
+    result.dry_run
+      ? `Dry run checked GitHub project creation for ${args.title}.`
+      : result.url
+        ? `Created GitHub project ${result.url}.`
+        : `Project creation did not complete for ${args.title}.`
+  );
+});
+
+export const githubProjectItemListHandler: ToolHandler = async (input, context) => safeTool<GitHubProjectItemListInput>("repo_github_project_item_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).listProjectItems(args);
+  audit({ tool: "repo_github_project_item_list", repo_id: args.repo_id, counts: { items: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Returned ${result.count} items for project #${args.project_number}.`);
+});
+
+export const githubProjectItemAddHandler: ToolHandler = async (input, context) => safeTool<GitHubProjectItemAddInput>("repo_github_project_item_add", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).addProjectItem(args);
+  audit({ tool: "repo_github_project_item_add", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(
+    result,
+    result.dry_run
+      ? `Dry run checked adding item to project #${args.project_number}.`
+      : `Added item to project #${args.project_number}.`
+  );
+});
+
+export const githubMilestoneListHandler: ToolHandler = async (input, context) => safeTool<GitHubMilestoneListInput>("repo_github_milestone_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).listMilestones(args);
+  audit({ tool: "repo_github_milestone_list", repo_id: args.repo_id, counts: { milestones: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} milestones for ${result.repository}.` : "No GitHub repository was detected.");
+});
+
+export const githubMilestoneReadHandler: ToolHandler = async (input, context) => safeTool<GitHubMilestoneReadInput>("repo_github_milestone_read", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).readMilestone(args);
+  audit({ tool: "repo_github_milestone_read", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Read milestone #${result.number}: ${result.title}.`);
+});
+
+export const githubMilestoneCreateHandler: ToolHandler = async (input, context) => safeTool<GitHubMilestoneCreateInput>("repo_github_milestone_create", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitHubService(repo.root).createMilestone(args);
+  audit({ tool: "repo_github_milestone_create", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(
+    result,
+    result.dry_run
+      ? `Dry run checked GitHub milestone creation for ${args.title}.`
+      : result.url
+        ? `Created GitHub milestone ${result.url}.`
+        : `Milestone creation did not complete for ${args.title}.`
+  );
 });
 
 export const gitStatusHandler: ToolHandler = async (input, context) => safeTool<RepoInput>("repo_git_status", input, context, async (args) => {
@@ -201,6 +344,34 @@ export const gitDiffHandler: ToolHandler = async (input, context) => safeTool<Gi
   const result = await new GitService(repo.root).diff(args);
   audit({ tool: "repo_git_diff", repo_id: args.repo_id, paths: args.paths, counts: { files: result.files.length }, truncated: result.truncated, warnings: result.warnings });
   return createSuccessEnvelope(result, `Returned diff for ${result.files.length} files.`);
+});
+
+export const gitLogHandler: ToolHandler = async (input, context) => safeTool<GitLogInput>("repo_git_log", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitService(repo.root).log(args);
+  audit({ tool: "repo_git_log", repo_id: args.repo_id, counts: { entries: result.entries.length }, truncated: result.truncated });
+  return createSuccessEnvelope(result, `Returned ${result.entries.length} commit(s).`);
+});
+
+export const gitShowHandler: ToolHandler = async (input, context) => safeTool<GitShowInput>("repo_git_show", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitService(repo.root).show(args.commit_sha, args.max_bytes);
+  audit({ tool: "repo_git_show", repo_id: args.repo_id, truncated: result.truncated });
+  return createSuccessEnvelope(result, `Returned commit ${result.sha}.`);
+});
+
+export const gitBlameHandler: ToolHandler = async (input, context) => safeTool<GitBlameInput>("repo_git_blame", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitService(repo.root).blame(args.path, { ref: args.ref, max_bytes: args.max_bytes });
+  audit({ tool: "repo_git_blame", repo_id: args.repo_id, counts: { lines: result.lines.length }, truncated: result.truncated });
+  return createSuccessEnvelope(result, `Returned blame for ${result.file} (${result.lines.length} lines).`);
+});
+
+export const gitBranchesHandler: ToolHandler = async (input, context) => safeTool<GitBranchesInput>("repo_git_branches", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const result = await new GitService(repo.root).branches(args);
+  audit({ tool: "repo_git_branches", repo_id: args.repo_id, counts: { branches: result.branches.length }, truncated: result.truncated });
+  return createSuccessEnvelope(result, `Returned ${result.branches.length} branch(es).`);
 });
 
 export const gitReviewHandler: ToolHandler = async (input, context) => safeTool<GitReviewInput>("repo_git_review", input, context, async (args) => {
@@ -389,6 +560,7 @@ export const writeFileHandler: ToolHandler = async (input, context) => safeTool<
   const headShaBefore = await readHeadSha(repo.root);
   const result = await new FileWriter(repo.root, sandbox, new WritePolicy(repo.writes)).write(args);
   if (!result.dry_run && result.changed) {
+    context.cache.invalidate(`file:${args.repo_id}`);
     const headShaAfter = await readHeadSha(repo.root);
     const receipt = await new OperationReceiptService(repo.root).writeLastWrite({
       tool: "repo_write_file",
@@ -425,6 +597,7 @@ export const writeChangesHandler: ToolHandler = async (input, context) => safeTo
   const headShaBefore = await readHeadSha(repo.root);
   const result = await new WriteChangesService(repo.root, sandbox, new WritePolicy(repo.writes)).apply(args);
   if (!result.dry_run && result.changed_paths.length > 0) {
+    context.cache.invalidate(`file:${args.repo_id}`);
     const headShaAfter = await readHeadSha(repo.root);
     const receipt = await new OperationReceiptService(repo.root).writeLastWrite({
       tool: "repo_write_changes",
@@ -471,6 +644,127 @@ export const writeHandoffHandler: ToolHandler = async (input, context) => safeTo
   );
 });
 
+export const listHandoffsHandler: ToolHandler = async (input, context) => safeTool<HandoffListInput>("repo_handoff_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const handoffDir = `${repo.root}/.chatgpt/handoffs`;
+  const handoffs: Array<{ path: string; title: string; branch?: string; head_sha?: string; created_at?: string }> = [];
+  let total = 0;
+  try {
+    const entries = await readdir(handoffDir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".local.md") || entry === "current.local.md") continue;
+      total++;
+      const content = await readFile(`${handoffDir}/${entry}`, "utf8").catch(() => "");
+      const titleMatch = content.match(/^# (.+)$/m);
+      const branchMatch = content.match(/^- Branch: (.+)$/m);
+      const shaMatch = content.match(/^- Head: ([0-9a-f]+)$/m);
+      const dateMatch = entry.match(/^(\d{4}-\d{2}-\d{2})-(\d{4})/);
+      handoffs.push({
+        path: `.chatgpt/handoffs/${entry}`,
+        title: titleMatch?.[1] ?? entry,
+        branch: branchMatch?.[1],
+        head_sha: shaMatch?.[1],
+        created_at: dateMatch ? `${dateMatch[1]}T${dateMatch[2].slice(0, 2)}:${dateMatch[2].slice(2)}` : undefined
+      });
+    }
+  } catch {
+    // directory may not exist yet
+  }
+  handoffs.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  const maxResults = args.max_results ?? 20;
+  const truncated = total > maxResults;
+  const result: HandoffListResult = {
+    handoffs: handoffs.slice(0, maxResults),
+    current_path: await readCurrentPointer(repo.root),
+    total,
+    truncated
+  };
+  audit({ tool: "repo_handoff_list", repo_id: args.repo_id, counts: { handoffs: result.handoffs.length, total }, warnings: [] });
+  return createSuccessEnvelope(result, `Found ${result.handoffs.length} handoff(s)${truncated ? ` (truncated from ${total})` : ""}.`);
+});
+
+async function readCurrentPointer(root: string): Promise<string | undefined> {
+  try {
+    const content = await readFile(`${root}/.chatgpt/handoffs/current.local.md`, "utf8");
+    const match = content.match(/^- Handoff: (.+)$/m);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+export const actionListHandler: ToolHandler = async (input, context) => safeTool<ActionListInput>("repo_action_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = service.list();
+  audit({ tool: "repo_action_list", repo_id: args.repo_id, counts: { actions: result.actions.length }, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Listed ${result.actions.length} configured actions.`);
+});
+
+export const actionDescribeHandler: ToolHandler = async (input, context) => safeTool<ActionDescribeInput>("repo_action_describe", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = service.describe(args);
+  audit({ tool: "repo_action_describe", repo_id: args.repo_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Described action: ${result.name}.`);
+});
+
+export const actionRunHandler: ToolHandler = async (input, context) => safeTool<ActionRunInput>("repo_action_run", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = await service.run(args);
+  audit({ tool: "repo_action_run", repo_id: args.repo_id, run_id: result.run_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Action ${result.action} finished with status ${result.status}.`);
+});
+
+export const actionStatusHandler: ToolHandler = async (input, context) => safeTool<ActionStatusInput>("repo_action_status", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = await service.status(args);
+  audit({ tool: "repo_action_status", repo_id: args.repo_id, run_id: result.run_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Action ${result.action} is ${result.status}.`);
+});
+
+export const actionLogsHandler: ToolHandler = async (input, context) => safeTool<ActionLogsInput>("repo_action_logs", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = await service.logs(args);
+  audit({ tool: "repo_action_logs", repo_id: args.repo_id, run_id: result.run_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Retrieved logs for run ${result.run_id}.`);
+});
+
+export const actionCancelHandler: ToolHandler = async (input, context) => safeTool<ActionCancelInput>("repo_action_cancel", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = await service.cancel(args);
+  audit({ tool: "repo_action_cancel", repo_id: args.repo_id, run_id: result.run_id, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Action ${result.action} cancelled.`);
+});
+
+export const actionRecentHandler: ToolHandler = async (input, context) => safeTool<ActionRecentInput>("repo_action_recent", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new ActionService(repo.root, repo.actions);
+  const result = await service.recent(args);
+  audit({ tool: "repo_action_recent", repo_id: args.repo_id, counts: { runs: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, `Returned ${result.count} recent action runs.`);
+});
+
+export const createFilesHandler: ToolHandler = async (input, context) => safeTool<CreateFilesInput>("repo_create_files", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new FileCreateService(repo.root);
+  const result = await service.createFiles(args);
+  audit({ tool: "repo_create_files", repo_id: args.repo_id, paths: result.created_files.map(f => f.path), counts: { created: result.created_files.length, skipped: result.skipped.length }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.status === "previewed" ? `Previewed creation of ${result.skipped.length} files.` : `Created ${result.created_files.length} files.`);
+});
+
+export const applyPatchHandler: ToolHandler = async (input, context) => safeTool<ApplyPatchInput>("repo_apply_patch", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const service = new PatchService(repo.root);
+  const result = await service.applyPatch(args);
+  audit({ tool: "repo_apply_patch", repo_id: args.repo_id, paths: result.applied_files.map(f => f.path), counts: { applied: result.applied_files.length }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.status === "previewed" ? "Previewed patch application." : `Applied patch to ${result.applied_files.length} files.`);
+});
+
 async function safeTool<TInput extends Record<string, unknown>>(
   tool: string,
   input: unknown,
@@ -492,3 +786,26 @@ async function readHeadSha(root: string): Promise<string | undefined> {
     return undefined;
   }
 }
+
+export const manifestHandler: ToolHandler = async (input, context) => safeTool<ManifestInput>("repo_manifest", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  const tools = toolCatalog.map((t) => ({
+    name: t.name,
+    title: t.title,
+    description: t.description,
+    effect: t.effect,
+    readonly: t.annotations.readOnlyHint ?? true
+  }));
+  const result: ManifestResult = {
+    profile: context.toolProfile,
+    tool_count: tools.length,
+    tools,
+    policies: {
+      writes_enabled: repo.writes?.enabled ?? false,
+      operations_enabled: repo.operations?.enabled ?? false,
+      actions_enabled: repo.actions?.enabled ?? false
+    }
+  };
+  audit({ tool: "repo_manifest", repo_id: args.repo_id, counts: { tools: result.tool_count } });
+  return createSuccessEnvelope(result, `Manifest: ${result.tool_count} tools (${result.profile} profile).`);
+});

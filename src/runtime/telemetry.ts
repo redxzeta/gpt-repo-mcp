@@ -22,6 +22,7 @@ export type AuditEvent = {
   request_id?: string;
   mcp_method?: string;
   mcp_tool?: string;
+  run_id?: string;
 };
 
 export type RequestAuditEvent = {

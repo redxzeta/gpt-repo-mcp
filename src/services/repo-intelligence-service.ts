@@ -510,7 +510,7 @@ function commandsForValidation(
   goal?: string
 ) {
   const run = packageManager === "pnpm" ? "pnpm" : packageManager === "yarn" ? "yarn" : packageManager === "bun" ? "bun run" : "npm run";
-  const commands = [];
+  const commands: Array<{ command: string; reason: string; confidence: "low" | "medium" | "high" }> = [];
   const scriptNames = new Set(scripts.map((script) => script.name));
   const addScript = (name: string, reason: string, confidence: "low" | "medium" | "high") => {
     if (scriptNames.has(name)) {
