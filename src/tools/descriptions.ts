@@ -102,9 +102,9 @@ export const descriptions = {
   repo_plan_review:
     "Use this when the user asks for broad or ambiguous repository review.",
   repo_prepare_codex_task:
-    "Use this when the user asks for a Codex prompt returned in chat for review.",
+    "Use this when the user explicitly wants chat-copy mode: a Codex prompt returned in chat for review/copying. Does not write files or implement the change. Do not use when Codex will be told to implement .chatgpt/codex-runs/<run_id>/PROMPT.md; use repo_write_codex_task instead.",
   repo_write_codex_task:
-    "Use this when the user asks to write a Codex prompt into the repo for later execution.",
+    "Use this when the user explicitly asks to create, write, start, resume, or hand off a repo-local Codex prompt/task/run that Codex will execute from the repo. Prefer this by default for repo-local Codex delegation. Writes only .chatgpt/codex-runs/<run_id>/PROMPT.md and run.json through repo write policy; does not implement, stage, commit, push, or run Codex.",
   repo_codex_review:
     "Use this when the user asks to review a repo-local Codex run result.",
   repo_write_file:
