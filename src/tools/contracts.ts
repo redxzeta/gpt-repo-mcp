@@ -8,7 +8,7 @@ import { FetchFileInputSchema, FileContentSchema, ReadManyInputSchema, ReadManyR
 import { ApplyPatchInputSchema, ApplyPatchResultSchema, CreateFilesInputSchema, CreateFilesResultSchema } from "../contracts/file-operations.contract.js";
 import { GitCommitInputSchema, GitCommitResultSchema, GitRecoverInputSchema, GitRecoverResultSchema, GitRestorePathsInputSchema, GitRestorePathsResultSchema, GitStageCommitInputSchema, GitStageCommitResultSchema, GitStageInputSchema, GitStageResultSchema, GitUnstageInputSchema, GitUnstageResultSchema } from "../contracts/git-operations.contract.js";
 import { GitDiffInputSchema, GitDiffResultSchema, GitStatusInputSchema, GitStatusResultSchema, GitLogInputSchema, GitLogResultSchema, GitShowInputSchema, GitShowResultSchema, GitBlameInputSchema, GitBlameResultSchema, GitBranchesInputSchema, GitBranchesResultSchema } from "../contracts/git.contract.js";
-import { GitHubCommentResultSchema, GitHubIssueCommentInputSchema, GitHubIssueCreateInputSchema, GitHubIssueCreateResultSchema, GitHubIssuesInputSchema, GitHubIssuesResultSchema, GitHubIssueReadInputSchema, GitHubIssueReadResultSchema, GitHubMilestoneCreateInputSchema, GitHubMilestoneCreateResultSchema, GitHubMilestoneListInputSchema, GitHubMilestoneListResultSchema, GitHubMilestoneReadInputSchema, GitHubMilestoneReadResultSchema, GitHubPrChecksInputSchema, GitHubPrChecksResultSchema, GitHubPrCreateInputSchema, GitHubPrCreateResultSchema, GitHubPrListInputSchema, GitHubPrListResultSchema, GitHubPrReadInputSchema, GitHubPrReadResultSchema, GitHubProjectCreateInputSchema, GitHubProjectCreateResultSchema, GitHubProjectItemAddInputSchema, GitHubProjectItemAddResultSchema, GitHubProjectItemListInputSchema, GitHubProjectItemListResultSchema, GitHubProjectListInputSchema, GitHubProjectListResultSchema, GitHubProjectReadInputSchema, GitHubProjectReadResultSchema, GitHubPullRequestCommentInputSchema } from "../contracts/github.contract.js";
+import { GitHubCommentResultSchema, GitHubIssueCommentInputSchema, GitHubIssueCreateInputSchema, GitHubIssueCreateResultSchema, GitHubIssueDeleteInputSchema, GitHubIssueDeleteResultSchema, GitHubIssueEditInputSchema, GitHubIssueEditResultSchema, GitHubIssuesInputSchema, GitHubIssuesResultSchema, GitHubIssueReadInputSchema, GitHubIssueReadResultSchema, GitHubLabelCreateInputSchema, GitHubLabelCreateResultSchema, GitHubLabelListInputSchema, GitHubLabelListResultSchema, GitHubMilestoneCreateInputSchema, GitHubMilestoneCreateResultSchema, GitHubMilestoneListInputSchema, GitHubMilestoneListResultSchema, GitHubMilestoneReadInputSchema, GitHubMilestoneReadResultSchema, GitHubPrChecksInputSchema, GitHubPrChecksResultSchema, GitHubPrCreateInputSchema, GitHubPrCreateResultSchema, GitHubPrListInputSchema, GitHubPrListResultSchema, GitHubPrReadInputSchema, GitHubPrReadResultSchema, GitHubProjectCreateInputSchema, GitHubProjectCreateResultSchema, GitHubProjectItemAddInputSchema, GitHubProjectItemAddResultSchema, GitHubProjectItemListInputSchema, GitHubProjectItemListResultSchema, GitHubProjectListInputSchema, GitHubProjectListResultSchema, GitHubProjectReadInputSchema, GitHubProjectReadResultSchema, GitHubPullRequestCommentInputSchema } from "../contracts/github.contract.js";
 import { GitReviewInputSchema, GitReviewResultSchema } from "../contracts/git-review.contract.js";
 import { HandoffInputSchema, HandoffResultSchema, HandoffListInputSchema, HandoffListResultSchema } from "../contracts/handoff.contract.js";
 import { ManifestInputSchema, ManifestResultSchema } from "../contracts/manifest.contract.js";
@@ -40,6 +40,10 @@ export type ToolName =
   | "repo_github_issues"
   | "repo_github_issue_create"
   | "repo_github_issue_comment"
+  | "repo_github_issue_edit"
+  | "repo_github_issue_delete"
+  | "repo_github_label_list"
+  | "repo_github_label_create"
   | "repo_github_pr_comment"
   | "repo_github_issue_read"
   | "repo_github_pr_list"
@@ -157,6 +161,22 @@ export const toolContracts = {
   repo_github_issue_comment: {
     input: GitHubIssueCommentInputSchema,
     output: GitHubCommentResultSchema
+  },
+  repo_github_issue_edit: {
+    input: GitHubIssueEditInputSchema,
+    output: GitHubIssueEditResultSchema
+  },
+  repo_github_issue_delete: {
+    input: GitHubIssueDeleteInputSchema,
+    output: GitHubIssueDeleteResultSchema
+  },
+  repo_github_label_list: {
+    input: GitHubLabelListInputSchema,
+    output: GitHubLabelListResultSchema
+  },
+  repo_github_label_create: {
+    input: GitHubLabelCreateInputSchema,
+    output: GitHubLabelCreateResultSchema
   },
   repo_github_pr_comment: {
     input: GitHubPullRequestCommentInputSchema,

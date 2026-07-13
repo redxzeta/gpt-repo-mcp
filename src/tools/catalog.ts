@@ -21,7 +21,11 @@ import {
   githubIssuesHandler,
   githubIssueCreateHandler,
   githubIssueCommentHandler,
+  githubIssueEditHandler,
+  githubIssueDeleteHandler,
   githubIssueReadHandler,
+  githubLabelListHandler,
+  githubLabelCreateHandler,
   githubPrChecksHandler,
   githubPrCommentHandler,
   githubPrCreateHandler,
@@ -225,6 +229,46 @@ export const toolCatalog: ToolDefinition[] = [
     effect: "external-write",
     annotations: externalWriteAnnotations,
     handler: githubIssueCommentHandler
+  },
+  {
+    name: "repo_github_issue_edit",
+    title: "Edit GitHub issue",
+    description: descriptions.repo_github_issue_edit,
+    inputSchema: toolContracts.repo_github_issue_edit.input,
+    outputSchema: toolContracts.repo_github_issue_edit.output,
+    effect: "external-write",
+    annotations: externalWriteAnnotations,
+    handler: githubIssueEditHandler
+  },
+  {
+    name: "repo_github_issue_delete",
+    title: "Delete GitHub issue",
+    description: descriptions.repo_github_issue_delete,
+    inputSchema: toolContracts.repo_github_issue_delete.input,
+    outputSchema: toolContracts.repo_github_issue_delete.output,
+    effect: "external-write",
+    annotations: externalWriteAnnotations,
+    handler: githubIssueDeleteHandler
+  },
+  {
+    name: "repo_github_label_list",
+    title: "List GitHub labels",
+    description: descriptions.repo_github_label_list,
+    inputSchema: toolContracts.repo_github_label_list.input,
+    outputSchema: toolContracts.repo_github_label_list.output,
+    effect: "external-read",
+    annotations: externalReadOnlyAnnotations,
+    handler: githubLabelListHandler
+  },
+  {
+    name: "repo_github_label_create",
+    title: "Create GitHub label",
+    description: descriptions.repo_github_label_create,
+    inputSchema: toolContracts.repo_github_label_create.input,
+    outputSchema: toolContracts.repo_github_label_create.output,
+    effect: "external-write",
+    annotations: externalWriteAnnotations,
+    handler: githubLabelCreateHandler
   },
   {
     name: "repo_github_pr_comment",

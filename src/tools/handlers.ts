@@ -7,6 +7,7 @@ import { RepoTreeService } from "../services/repo-tree-service.js";
 import { SearchService } from "../services/search-service.js";
 import { FileReader } from "../services/file-reader.js";
 import { GitHubService } from "../services/github-service.js";
+import { GitHubPolicy } from "../services/github-policy.js";
 import { GitService } from "../services/git-service.js";
 import { GitReviewService } from "../services/git-review-service.js";
 import { GitOperationsService } from "../services/git-operations-service.js";
@@ -37,7 +38,7 @@ import type { RuntimeContext } from "../runtime/context.js";
 import type { SearchOptions } from "../services/search-service.js";
 import type { FetchFileOptions } from "../services/file-reader.js";
 import type { TreeOptions } from "../services/repo-tree-service.js";
-import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssuesInput, GitHubIssueReadInput, GitHubMilestoneCreateInput, GitHubMilestoneListInput, GitHubMilestoneReadInput, GitHubProjectCreateInput, GitHubProjectItemAddInput, GitHubProjectItemListInput, GitHubProjectListInput, GitHubProjectReadInput, GitHubPullRequestCommentInput, GitHubPrChecksInput, GitHubPrCreateInput, GitHubPrListInput, GitHubPrReadInput } from "../contracts/github.contract.js";
+import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssueDeleteInput, GitHubIssueEditInput, GitHubIssuesInput, GitHubIssueReadInput, GitHubLabelCreateInput, GitHubLabelListInput, GitHubMilestoneCreateInput, GitHubMilestoneListInput, GitHubMilestoneReadInput, GitHubProjectCreateInput, GitHubProjectItemAddInput, GitHubProjectItemListInput, GitHubProjectListInput, GitHubProjectReadInput, GitHubPullRequestCommentInput, GitHubPrChecksInput, GitHubPrCreateInput, GitHubPrListInput, GitHubPrReadInput } from "../contracts/github.contract.js";
 import type { ProjectBriefInput } from "../contracts/project.contract.js";
 import type { AgentContextInput, DependencyMapInput, SymbolOutlineInput, ValidationPlanInput } from "../contracts/repo-intelligence.contract.js";
 import type { TaskInventoryInput } from "../contracts/task.contract.js";
@@ -184,29 +185,48 @@ export const agentContextHandler: ToolHandler = async (input, context) => safeTo
 
 export const githubIssuesHandler: ToolHandler = async (input, context) => safeTool<GitHubIssuesInput>("repo_github_issues", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
+  new GitHubPolicy(repo.github).assertIssuesReadAllowed();
   const result = await new GitHubService(repo.root).listIssues(args);
   audit({ tool: "repo_github_issues", repo_id: args.repo_id, counts: { issues: result.count }, warnings: result.warnings });
   return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} GitHub issues for ${result.repository}.` : "No GitHub repository was detected.");
 });
 
-export const githubIssueCreateHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueCreateInput>("repo_github_issue_create", input, context, async (args) => {
-  const repo = context.registry.get(args.repo_id);
-  const result = await new GitHubService(repo.root).createIssue(args);
-  audit({ tool: "repo_github_issue_create", repo_id: args.repo_id, warnings: result.warnings });
-  return createSuccessEnvelope(
-    result,
-    result.dry_run
-      ? `Dry run checked GitHub issue creation for ${args.title}.`
-      : result.url
-        ? `Created GitHub issue ${result.url}.`
-        : `Issue creation did not complete for ${args.title}.`
-  );
-});
+export const githubIssueCreateHandler: ToolHandler = async (input, context) => {
+  const startMs = Date.now();
+  return safeTool<GitHubIssueCreateInput>("repo_github_issue_create", input, context, async (args) => {
+    const repo = context.registry.get(args.repo_id);
+    new GitHubPolicy(repo.github).assertIssuesCreateAllowed();
+    const service = new GitHubService(repo.root);
+    const result = await service.createIssue(args);
+    audit({
+      tool: "repo_github_issue_create",
+      repo_id: args.repo_id,
+      resolved_repository: result.repository,
+      dry_run: result.dry_run,
+      issue_number: result.number,
+      issue_url: result.url,
+      title_length: args.title.length,
+      counts: { labels: args.labels?.length ?? 0, assignees: args.assignees?.length ?? 0 },
+      duration_ms: Date.now() - startMs,
+      reason: args.reason,
+      warnings: result.warnings
+    });
+    return createSuccessEnvelope(
+      result,
+      result.dry_run
+        ? `Dry run previewed GitHub issue creation for ${args.title}.`
+        : result.url
+          ? `Created GitHub issue ${result.url}.`
+          : `Issue creation did not complete for ${args.title}.`
+    );
+  });
+};
 
 export const githubIssueCommentHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueCommentInput>("repo_github_issue_comment", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
+  new GitHubPolicy(repo.github).assertIssuesCommentAllowed();
   const result = await new GitHubService(repo.root).commentOnIssue(args);
-  audit({ tool: "repo_github_issue_comment", repo_id: args.repo_id, warnings: result.warnings });
+  audit({ tool: "repo_github_issue_comment", repo_id: args.repo_id, dry_run: result.dry_run, issue_number: args.issue_number, reason: args.reason, warnings: result.warnings });
   return createSuccessEnvelope(result, result.dry_run ? `Dry run checked issue comment on #${args.issue_number}.` : `Commented on issue #${args.issue_number}.`);
 });
 
@@ -219,8 +239,9 @@ export const githubPrCommentHandler: ToolHandler = async (input, context) => saf
 
 export const githubIssueReadHandler: ToolHandler = async (input, context) => safeTool<GitHubIssueReadInput>("repo_github_issue_read", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
+  new GitHubPolicy(repo.github).assertIssuesReadAllowed();
   const result = await new GitHubService(repo.root).readIssue(args);
-  audit({ tool: "repo_github_issue_read", repo_id: args.repo_id, warnings: result.warnings });
+  audit({ tool: "repo_github_issue_read", repo_id: args.repo_id, issue_number: args.issue_number, warnings: result.warnings });
   return createSuccessEnvelope(result, `Read issue #${result.number}: ${result.title}.`);
 });
 
@@ -333,6 +354,90 @@ export const githubMilestoneCreateHandler: ToolHandler = async (input, context) 
         : `Milestone creation did not complete for ${args.title}.`
   );
 });
+
+export const githubIssueEditHandler: ToolHandler = async (input, context) => {
+  const startMs = Date.now();
+  return safeTool<GitHubIssueEditInput>("repo_github_issue_edit", input, context, async (args) => {
+    const repo = context.registry.get(args.repo_id);
+    new GitHubPolicy(repo.github).assertIssuesEditAllowed();
+    const result = await new GitHubService(repo.root).editIssue(args);
+    audit({
+      tool: "repo_github_issue_edit",
+      repo_id: args.repo_id,
+      resolved_repository: result.repository,
+      dry_run: result.dry_run,
+      issue_number: args.issue_number,
+      duration_ms: Date.now() - startMs,
+      reason: args.reason,
+      warnings: result.warnings
+    });
+    return createSuccessEnvelope(
+      result,
+      result.dry_run
+        ? `Dry run previewed edit for issue #${args.issue_number}.`
+        : `Edited issue #${args.issue_number}.`
+    );
+  });
+};
+
+export const githubIssueDeleteHandler: ToolHandler = async (input, context) => {
+  const startMs = Date.now();
+  return safeTool<GitHubIssueDeleteInput>("repo_github_issue_delete", input, context, async (args) => {
+    const repo = context.registry.get(args.repo_id);
+    new GitHubPolicy(repo.github).assertIssuesDeleteAllowed();
+    const result = await new GitHubService(repo.root).deleteIssue(args);
+    audit({
+      tool: "repo_github_issue_delete",
+      repo_id: args.repo_id,
+      resolved_repository: result.repository,
+      dry_run: result.dry_run,
+      issue_number: args.issue_number,
+      duration_ms: Date.now() - startMs,
+      reason: args.reason,
+      warnings: result.warnings
+    });
+    return createSuccessEnvelope(
+      result,
+      result.dry_run
+        ? `Dry run previewed deletion for issue #${args.issue_number}.`
+        : `Deleted issue #${args.issue_number}.`
+    );
+  });
+};
+
+export const githubLabelListHandler: ToolHandler = async (input, context) => safeTool<GitHubLabelListInput>("repo_github_label_list", input, context, async (args) => {
+  const repo = context.registry.get(args.repo_id);
+  new GitHubPolicy(repo.github).assertLabelsReadAllowed();
+  const result = await new GitHubService(repo.root).listLabels(args);
+  audit({ tool: "repo_github_label_list", repo_id: args.repo_id, counts: { labels: result.count }, warnings: result.warnings });
+  return createSuccessEnvelope(result, result.repository ? `Returned ${result.count} labels for ${result.repository}.` : "No GitHub repository was detected.");
+});
+
+export const githubLabelCreateHandler: ToolHandler = async (input, context) => {
+  const startMs = Date.now();
+  return safeTool<GitHubLabelCreateInput>("repo_github_label_create", input, context, async (args) => {
+    const repo = context.registry.get(args.repo_id);
+    new GitHubPolicy(repo.github).assertLabelsCreateAllowed();
+    const result = await new GitHubService(repo.root).createLabel(args);
+    audit({
+      tool: "repo_github_label_create",
+      repo_id: args.repo_id,
+      resolved_repository: result.repository,
+      dry_run: result.dry_run,
+      counts: { label_name_length: args.name.length },
+      duration_ms: Date.now() - startMs,
+      warnings: result.warnings
+    });
+    return createSuccessEnvelope(
+      result,
+      result.dry_run
+        ? `Dry run previewed label creation for '${args.name}'.`
+        : result.url
+          ? `Created label '${args.name}' at ${result.url}.`
+          : `Label creation did not complete for '${args.name}'.`
+    );
+  });
+};
 
 export const gitStatusHandler: ToolHandler = async (input, context) => safeTool<RepoInput>("repo_git_status", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
@@ -776,7 +881,8 @@ async function safeTool<TInput extends Record<string, unknown>>(
   try {
     return await run(input as TInput);
   } catch (error) {
-    audit({ tool, repo_id: typeof input === "object" && input && "repo_id" in input ? String(input.repo_id) : undefined, warnings: [toRepoReaderError(error).code] });
+    const err = toRepoReaderError(error);
+    audit({ tool, repo_id: typeof input === "object" && input && "repo_id" in input ? String(input.repo_id) : undefined, warnings: [err.code], error: err.message.slice(0, 300) });
     return createErrorEnvelope(toRepoReaderError(error));
   }
 }
@@ -805,7 +911,16 @@ export const manifestHandler: ToolHandler = async (input, context) => safeTool<M
     policies: {
       writes_enabled: repo.writes?.enabled ?? false,
       operations_enabled: repo.operations?.enabled ?? false,
-      actions_enabled: repo.actions?.enabled ?? false
+      actions_enabled: repo.actions?.enabled ?? false,
+      github: repo.github ? {
+        issues_read: repo.github.issues_read ?? false,
+        issues_create: repo.github.issues_create ?? false,
+        issues_edit: repo.github.issues_edit ?? false,
+        issues_delete: repo.github.issues_delete ?? false,
+        issues_comment: repo.github.issues_comment ?? false,
+        labels_read: repo.github.labels_read ?? false,
+        labels_create: repo.github.labels_create ?? false
+      } : undefined
     }
   };
   audit({ tool: "repo_manifest", repo_id: args.repo_id, counts: { tools: result.tool_count } });

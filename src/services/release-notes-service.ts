@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { RepoReaderError } from "../runtime/errors.js";
 import type { ReleaseNotesInput, ReleaseNotesResult } from "../contracts/release-notes.contract.js";
 
 const execFileAsync = promisify(execFile);

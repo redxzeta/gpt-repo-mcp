@@ -16,7 +16,16 @@ export const ManifestResultSchema = z.object({
   policies: z.object({
     writes_enabled: z.boolean(),
     operations_enabled: z.boolean(),
-    actions_enabled: z.boolean()
+    actions_enabled: z.boolean(),
+    github: z.object({
+      issues_read: z.boolean(),
+      issues_create: z.boolean(),
+      issues_edit: z.boolean(),
+      issues_delete: z.boolean(),
+      issues_comment: z.boolean(),
+      labels_read: z.boolean(),
+      labels_create: z.boolean()
+    }).optional()
   }).describe("Active per-repo policies.")
 });
 

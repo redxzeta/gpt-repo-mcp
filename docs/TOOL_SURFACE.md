@@ -223,6 +223,7 @@ Example:
 Creates a GitHub issue for the approved repo using the local authenticated
 `gh` CLI account. The tool derives the repository from the repo's GitHub
 `origin` remote and never accepts an arbitrary GitHub repository name.
+Body content is passed via a temporary file with restrictive permissions.
 
 Input: `repo_id`, required `title`, optional `body`, optional `labels[]`,
 optional `assignees[]`, optional `milestone`, and optional `dry_run`.
@@ -232,6 +233,39 @@ Example:
 
 ```json
 { "repo_id": "gpt-repo-mcp", "title": "Add symbol outline tool", "labels": ["enhancement"] }
+```
+
+### `repo_github_issue_edit`
+
+Edits a GitHub issue for the approved repo. Supports changing the title, body,
+state, milestone, and labels (add/remove). The tool derives the repository from
+the repo's GitHub `origin` remote.
+
+Input: `repo_id`, required `issue_number`, optional `title`, optional `body`,
+optional `state` (`open` or `closed`), optional `milestone`, optional
+`add_labels[]`, optional `remove_labels[]`, optional `dry_run`, and optional
+`reason`.
+Output: `ok`, `repository`, `issue_number`, `dry_run`, optional `url`, and
+`warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "issue_number": 42, "state": "closed", "reason": "Resolved in release v2.0" }
+```
+
+### `repo_github_issue_delete`
+
+Deletes a GitHub issue for the approved repo. Requires explicit `confirm: true`
+as a safety guard. The tool derives the repository from the repo's GitHub
+`origin` remote.
+
+Input: `repo_id`, required `issue_number`, required `confirm` (must be `true`),
+optional `dry_run`, and optional `reason`.
+Output: `ok`, `repository`, `issue_number`, `dry_run`, and `warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "issue_number": 99, "confirm": true, "reason": "Duplicate of issue #12" }
 ```
 
 ### `repo_github_issue_comment`
@@ -262,6 +296,36 @@ Example:
 
 ```json
 { "repo_id": "gpt-repo-mcp", "pr_number": 42, "body": "Looks good to merge." }
+```
+
+### `repo_github_label_list`
+
+Lists labels for the approved repo. The tool derives the repository from the
+repo's GitHub `origin` remote and is read-only.
+
+Input: `repo_id`, optional `max_results` (default 100, max 100).
+Output: `labels[]` with `name`, `color`, optional `description`, `count`, and
+`warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "max_results": 50 }
+```
+
+### `repo_github_label_create`
+
+Creates a GitHub label for the approved repo using the local authenticated
+`gh` CLI account. The tool derives the repository from the repo's GitHub
+`origin` remote.
+
+Input: `repo_id`, required `name`, required `color` (hex, without `#`),
+optional `description`, and optional `dry_run`.
+Output: `ok`, `repository`, `dry_run`, optional `label` with `name` and `color`,
+and `warnings`.
+Example:
+
+```json
+{ "repo_id": "gpt-repo-mcp", "name": "priority:high", "color": "ff0000", "dry_run": true }
 ```
 
 ### `repo_git_status`
@@ -743,6 +807,47 @@ Example:
 ```
 
 ## Recommended Workflows
+
+### GitHub Issue Management
+
+1. `repo_github_issues` to list open/closed issues.
+2. `repo_github_issue_read` to view a specific issue's full details.
+3. `repo_github_issue_create` to file a new issue.
+4. `repo_github_issue_edit` to update title, body, state, milestone, or labels.
+5. `repo_github_issue_comment` to add a comment.
+6. `repo_github_label_list` to see available labels before referencing them.
+7. `repo_github_label_create` to add a new label when needed.
+8. `repo_github_issue_delete` to remove duplicate or invalid issues (requires explicit `confirm: true`).
+
+### GitHub Policy
+
+All GitHub operations are gated by an explicit per-repository GitHub policy.
+By default, every operation is disabled. Enable only what the repository needs
+in the `repos[].github` config block:
+
+```json
+{
+  "repos": [
+    {
+      "id": "my-repo",
+      "root": ".",
+      "github": {
+        "issues_read": true,
+        "issues_create": true,
+        "issues_edit": true,
+        "issues_delete": false,
+        "issues_comment": true,
+        "labels_read": true,
+        "labels_create": false
+      }
+    }
+  ]
+}
+```
+
+In ChatGPT connect modes, the GitHub policy is automatically configured:
+- `read` mode: `issues_read: true`, all others disabled.
+- `ship` mode: all operations enabled.
 
 Project onboarding:
 

@@ -1,9 +1,13 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssuesInput, GitHubIssueReadInput, GitHubMilestoneCreateInput, GitHubMilestoneListInput, GitHubMilestoneReadInput, GitHubProjectCreateInput, GitHubProjectItemAddInput, GitHubProjectItemListInput, GitHubProjectListInput, GitHubProjectReadInput, GitHubPullRequestCommentInput, GitHubPrChecksInput, GitHubPrCreateInput, GitHubPrListInput, GitHubPrReadInput } from "../contracts/github.contract.js";
+import { writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import type { GitHubIssueCommentInput, GitHubIssueCreateInput, GitHubIssueDeleteInput, GitHubIssueEditInput, GitHubIssuesInput, GitHubIssueReadInput, GitHubLabelCreateInput, GitHubLabelListInput, GitHubMilestoneCreateInput, GitHubMilestoneListInput, GitHubMilestoneReadInput, GitHubProjectCreateInput, GitHubProjectItemAddInput, GitHubProjectItemListInput, GitHubProjectListInput, GitHubProjectReadInput, GitHubPullRequestCommentInput, GitHubPrChecksInput, GitHubPrCreateInput, GitHubPrListInput, GitHubPrReadInput } from "../contracts/github.contract.js";
 import { RepoReaderError } from "../runtime/errors.js";
+import { type GhRunner, defaultGhRunner } from "./gh-runner.js";
 
-const execFileAsync = promisify(execFile);
+const MUTATING_TIMEOUT_MS = 30_000;
+const READ_TIMEOUT_MS = 30_000;
 
 type GitHubIssue = {
   number: number;
@@ -17,7 +21,13 @@ type GitHubIssue = {
 };
 
 export class GitHubService {
-  constructor(private readonly root: string) {}
+  private readonly runner: GhRunner;
+  private readonly root: string;
+
+  constructor(root: string, runner?: GhRunner) {
+    this.root = root;
+    this.runner = runner ?? defaultGhRunner;
+  }
 
   async listIssues(options: Omit<GitHubIssuesInput, "repo_id">) {
     const warnings: string[] = [];
@@ -46,12 +56,13 @@ export class GitHubService {
     }
 
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const parsed = JSON.parse(String(stdout)) as GitHubIssue[];
+      const parsed = JSON.parse(stdout) as GitHubIssue[];
       const issues = parsed.map((issue) => ({
         number: issue.number,
         title: issue.title,
@@ -73,8 +84,26 @@ export class GitHubService {
     const warnings: string[] = [];
     const repository = await this.detectGitHubRepository(warnings);
     if (!repository) {
-      return { repository: undefined, title: options.title, dry_run: Boolean(options.dry_run), warnings };
+      return { created: false, repository: undefined, title: options.title, dry_run: Boolean(options.dry_run), warnings };
     }
+
+    if (options.dry_run) {
+      return {
+        created: false,
+        repository,
+        title: options.title,
+        dry_run: true,
+        normalized: {
+          title: options.title,
+          body: Boolean(options.body),
+          labels: options.labels ?? [],
+          assignees: options.assignees ?? [],
+          milestone: options.milestone
+        },
+        warnings
+      };
+    }
+
     const args = [
       "issue",
       "create",
@@ -83,51 +112,167 @@ export class GitHubService {
       "--title",
       options.title
     ];
-    if (options.body) {
-      args.push("--body", options.body);
+
+    let bodyTmpPath: string | undefined;
+    try {
+      if (options.body) {
+        bodyTmpPath = join(tmpdir(), `gh-issue-body-${randomUUID()}.md`);
+        await writeFile(bodyTmpPath, options.body, { encoding: "utf8", mode: 0o600 });
+        args.push("--body-file", bodyTmpPath);
+      }
+      for (const label of options.labels ?? []) {
+        args.push("--label", label);
+      }
+      for (const assignee of options.assignees ?? []) {
+        args.push("--assignee", assignee);
+      }
+      if (options.milestone) {
+        args.push("--milestone", options.milestone);
+      }
+
+      const { stdout } = await this.runner.run("gh", args, {
+        cwd: this.root,
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
+      });
+      const url = stdout.trim();
+      return {
+        created: true,
+        repository,
+        number: parseIssueNumber(url),
+        title: options.title,
+        url: url || undefined,
+        dry_run: false,
+        warnings
+      };
+    } catch (error) {
+      throw classifyGhError(error, "GH_ISSUE_CREATE_FAILED", `Failed to create issue`);
+    } finally {
+      await cleanupFile(bodyTmpPath);
     }
-    for (const label of options.labels ?? []) {
-      args.push("--label", label);
-    }
-    for (const assignee of options.assignees ?? []) {
-      args.push("--assignee", assignee);
-    }
-    if (options.milestone) {
-      args.push("--milestone", options.milestone);
+  }
+
+  async editIssue(options: Omit<GitHubIssueEditInput, "repo_id">) {
+    const warnings: string[] = [];
+    const repository = await this.detectGitHubRepository(warnings);
+    if (!repository) {
+      return { edited: false, repository: undefined, number: options.issue_number, dry_run: Boolean(options.dry_run), warnings };
     }
 
     if (options.dry_run) {
       return {
+        edited: false,
         repository,
-        title: options.title,
+        number: options.issue_number,
+        dry_run: true,
+        warnings
+      };
+    }
+
+    const args = [
+      "issue",
+      "edit",
+      String(options.issue_number),
+      "--repo",
+      repository
+    ];
+
+    if (options.title) {
+      args.push("--title", options.title);
+    }
+
+    let bodyTmpPath: string | undefined;
+    try {
+      if (options.body !== undefined) {
+        if (options.body === null) {
+          args.push("--body", "");
+        } else {
+          bodyTmpPath = join(tmpdir(), `gh-issue-body-${randomUUID()}.md`);
+          await writeFile(bodyTmpPath, options.body, { encoding: "utf8", mode: 0o600 });
+          args.push("--body-file", bodyTmpPath);
+        }
+      }
+      if (options.state) {
+        args.push("--state", options.state);
+      }
+      if (options.add_labels && options.add_labels.length > 0) {
+        args.push("--add-label", options.add_labels.join(","));
+      }
+      if (options.remove_labels && options.remove_labels.length > 0) {
+        args.push("--remove-label", options.remove_labels.join(","));
+      }
+      if (options.assignees !== undefined) {
+        args.push("--assignee", options.assignees.join(","));
+      }
+      if (options.milestone !== undefined) {
+        args.push("--milestone", options.milestone === null ? "" : options.milestone);
+      }
+
+      await this.runner.run("gh", args, {
+        cwd: this.root,
+        encoding: "utf8",
+        maxBuffer: 256 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
+      });
+      return {
+        edited: true,
+        repository,
+        number: options.issue_number,
+        dry_run: false,
+        warnings
+      };
+    } catch (error) {
+      throw classifyGhError(error, "GH_ISSUE_EDIT_FAILED", `Failed to edit issue #${options.issue_number}`);
+    } finally {
+      await cleanupFile(bodyTmpPath);
+    }
+  }
+
+  async deleteIssue(options: Omit<GitHubIssueDeleteInput, "repo_id">) {
+    const warnings: string[] = [];
+    const repository = await this.detectGitHubRepository(warnings);
+    if (!repository) {
+      return { deleted: false, repository: undefined, number: options.issue_number, dry_run: Boolean(options.dry_run), warnings };
+    }
+
+    if (!options.confirm) {
+      return { deleted: false, repository, number: options.issue_number, dry_run: true, warnings: [...warnings, "CONFIRM_REQUIRED"] };
+    }
+
+    if (options.dry_run) {
+      return {
+        deleted: false,
+        repository,
+        number: options.issue_number,
         dry_run: true,
         warnings
       };
     }
 
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      await this.runner.run("gh", [
+        "issue",
+        "delete",
+        String(options.issue_number),
+        "--repo",
+        repository,
+        "--yes"
+      ], {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 256 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
-      const url = String(stdout).trim();
       return {
+        deleted: true,
         repository,
-        issue_number: parseIssueNumber(url),
-        title: options.title,
-        url: url || undefined,
+        number: options.issue_number,
         dry_run: false,
         warnings
       };
-    } catch {
-      warnings.push("GH_ISSUE_CREATE_FAILED");
-      return {
-        repository,
-        title: options.title,
-        dry_run: false,
-        warnings
-      };
+    } catch (error) {
+      throw classifyGhError(error, "GH_ISSUE_DELETE_FAILED", `Failed to delete issue #${options.issue_number}`);
     }
   }
 
@@ -137,20 +282,27 @@ export class GitHubService {
     if (!repository) {
       return { repository: undefined, dry_run: Boolean(options.dry_run), warnings };
     }
-    const args = ["issue", "comment", String(options.issue_number), "--repo", repository, "--body", options.body];
+
     if (options.dry_run) {
       return { repository, dry_run: true, target_number: options.issue_number, warnings };
     }
+
+    let bodyTmpPath: string | undefined;
     try {
-      await execFileAsync("gh", args, {
+      bodyTmpPath = join(tmpdir(), `gh-issue-body-${randomUUID()}.md`);
+      await writeFile(bodyTmpPath, options.body, { encoding: "utf8", mode: 0o600 });
+      const args = ["issue", "comment", String(options.issue_number), "--repo", repository, "--body-file", bodyTmpPath];
+      await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 256 * 1024
+        maxBuffer: 256 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
       return { repository, dry_run: false, target_number: options.issue_number, warnings };
-    } catch {
-      warnings.push("GH_ISSUE_COMMENT_FAILED");
-      return { repository, dry_run: false, target_number: options.issue_number, warnings };
+    } catch (error) {
+      throw classifyGhError(error, "GH_ISSUE_COMMENT_FAILED", `Failed to comment on issue #${options.issue_number}`);
+    } finally {
+      await cleanupFile(bodyTmpPath);
     }
   }
 
@@ -160,20 +312,27 @@ export class GitHubService {
     if (!repository) {
       return { repository: undefined, dry_run: Boolean(options.dry_run), warnings };
     }
-    const args = ["pr", "comment", String(options.pr_number), "--repo", repository, "--body", options.body];
+
     if (options.dry_run) {
       return { repository, dry_run: true, target_number: options.pr_number, warnings };
     }
+
+    let bodyTmpPath: string | undefined;
     try {
-      await execFileAsync("gh", args, {
+      bodyTmpPath = join(tmpdir(), `gh-pr-body-${randomUUID()}.md`);
+      await writeFile(bodyTmpPath, options.body, { encoding: "utf8", mode: 0o600 });
+      const args = ["pr", "comment", String(options.pr_number), "--repo", repository, "--body-file", bodyTmpPath];
+      await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 256 * 1024
+        maxBuffer: 256 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
       return { repository, dry_run: false, target_number: options.pr_number, warnings };
-    } catch {
-      warnings.push("GH_PR_COMMENT_FAILED");
-      return { repository, dry_run: false, target_number: options.pr_number, warnings };
+    } catch (error) {
+      throw classifyGhError(error, "GH_PR_COMMENT_FAILED", `Failed to comment on PR #${options.pr_number}`);
+    } finally {
+      await cleanupFile(bodyTmpPath);
     }
   }
 
@@ -193,12 +352,13 @@ export class GitHubService {
       "number,title,state,body,labels,assignees,milestone,url,comments"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const issue = JSON.parse(String(stdout)) as {
+      const issue = JSON.parse(stdout) as {
         number: number;
         title: string;
         state: string;
@@ -228,6 +388,94 @@ export class GitHubService {
     }
   }
 
+  async listLabels(options: Omit<GitHubLabelListInput, "repo_id">) {
+    const warnings: string[] = [];
+    const repository = await this.detectGitHubRepository(warnings);
+    if (!repository) {
+      return { repository: undefined, labels: [], count: 0, warnings };
+    }
+    const maxResults = Math.min(options.max_results ?? 50, 100);
+    const args = [
+      "label",
+      "list",
+      "--repo",
+      repository,
+      "--limit",
+      String(maxResults),
+      "--json",
+      "name,color,description"
+    ];
+    try {
+      const { stdout } = await this.runner.run("gh", args, {
+        cwd: this.root,
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
+      });
+      const parsed = JSON.parse(stdout) as Array<{ name: string; color: string; description?: string }>;
+      const labels = parsed.map((label) => ({
+        name: label.name,
+        color: label.color,
+        description: label.description
+      }));
+      return { repository, labels, count: labels.length, warnings };
+    } catch {
+      warnings.push("GH_LABEL_LIST_FAILED");
+      return { repository, labels: [], count: 0, warnings };
+    }
+  }
+
+  async createLabel(options: Omit<GitHubLabelCreateInput, "repo_id">) {
+    const warnings: string[] = [];
+    const repository = await this.detectGitHubRepository(warnings);
+    if (!repository) {
+      return { created: false, repository: undefined, name: options.name, dry_run: Boolean(options.dry_run), warnings };
+    }
+
+    if (options.dry_run) {
+      return {
+        created: false,
+        repository,
+        name: options.name,
+        dry_run: true,
+        warnings
+      };
+    }
+
+    const args = [
+      "label",
+      "create",
+      options.name,
+      "--repo",
+      repository,
+      "--color",
+      options.color
+    ];
+    if (options.description) {
+      args.push("--description", options.description);
+    }
+
+    try {
+      await this.runner.run("gh", args, {
+        cwd: this.root,
+        encoding: "utf8",
+        maxBuffer: 256 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
+      });
+      const url = `https://github.com/${repository}/labels`;
+      return {
+        created: true,
+        repository,
+        name: options.name,
+        url,
+        dry_run: false,
+        warnings
+      };
+    } catch (error) {
+      throw classifyGhError(error, "GH_LABEL_CREATE_FAILED", `Failed to create label '${options.name}'`);
+    }
+  }
+
   async listPullRequests(options: Omit<GitHubPrListInput, "repo_id">) {
     const warnings: string[] = [];
     const repository = await this.detectGitHubRepository(warnings);
@@ -248,12 +496,13 @@ export class GitHubService {
       "number,title,state,author,headRefName,baseRefName,mergeable,url"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const prs = JSON.parse(String(stdout)) as Array<{
+      const prs = JSON.parse(stdout) as Array<{
         number: number;
         title: string;
         state: string;
@@ -300,12 +549,13 @@ export class GitHubService {
       "number,title,state,body,author,headRefName,baseRefName,mergeable,url,labels,reviews"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const pr = JSON.parse(String(stdout)) as {
+      const pr = JSON.parse(stdout) as {
         number: number;
         title: string;
         state: string;
@@ -357,38 +607,43 @@ export class GitHubService {
       "--base",
       options.base
     ];
-    if (options.body) {
-      args.push("--body", options.body);
-    }
-    if (options.draft) {
-      args.push("--draft");
-    }
-    for (const label of options.labels ?? []) {
-      args.push("--label", label);
-    }
-    for (const assignee of options.assignees ?? []) {
-      args.push("--assignee", assignee);
-    }
-    for (const reviewer of options.reviewers ?? []) {
-      args.push("--reviewer", reviewer);
-    }
 
-    if (options.dry_run) {
-      return {
-        repository,
-        status: "previewed" as const,
-        dry_run: true,
-        warnings
-      };
-    }
-
+    let bodyTmpPath: string | undefined;
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      if (options.body) {
+        bodyTmpPath = join(tmpdir(), `gh-pr-body-${randomUUID()}.md`);
+        await writeFile(bodyTmpPath, options.body, { encoding: "utf8", mode: 0o600 });
+        args.push("--body-file", bodyTmpPath);
+      }
+      if (options.draft) {
+        args.push("--draft");
+      }
+      for (const label of options.labels ?? []) {
+        args.push("--label", label);
+      }
+      for (const assignee of options.assignees ?? []) {
+        args.push("--assignee", assignee);
+      }
+      for (const reviewer of options.reviewers ?? []) {
+        args.push("--reviewer", reviewer);
+      }
+
+      if (options.dry_run) {
+        return {
+          repository,
+          status: "previewed" as const,
+          dry_run: true,
+          warnings
+        };
+      }
+
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
-      const url = String(stdout).trim();
+      const url = stdout.trim();
       const prNumber = parsePrNumber(url);
       return {
         repository,
@@ -406,6 +661,8 @@ export class GitHubService {
         dry_run: false,
         warnings
       };
+    } finally {
+      await cleanupFile(bodyTmpPath);
     }
   }
 
@@ -425,12 +682,13 @@ export class GitHubService {
       "name,state,description,url"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const checks = JSON.parse(String(stdout)) as Array<{
+      const checks = JSON.parse(stdout) as Array<{
         name: string;
         state: string;
         description?: string;
@@ -480,12 +738,13 @@ export class GitHubService {
       args.push("--closed");
     }
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const parsed = JSON.parse(String(stdout)) as { projects?: Array<{ number: number; title: string; state: string; url: string }> };
+      const parsed = JSON.parse(stdout) as { projects?: Array<{ number: number; title: string; state: string; url: string }> };
       const allProjects = parsed.projects ?? [];
       const filtered = options.state && options.state !== "all"
         ? allProjects.filter((p) => p.state.toLowerCase() === options.state)
@@ -515,12 +774,13 @@ export class GitHubService {
       "json"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const project = JSON.parse(String(stdout)) as {
+      const project = JSON.parse(stdout) as {
         number: number;
         title: string;
         state: string;
@@ -576,12 +836,13 @@ export class GitHubService {
     }
 
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
-      const url = String(stdout).trim();
+      const url = stdout.trim();
       const projectNumber = /\/projects\/(\d+)/.exec(url)?.[1];
       return {
         repository,
@@ -618,12 +879,13 @@ export class GitHubService {
       "json"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const parsed = JSON.parse(String(stdout)) as Array<{ id: string; type: string; title?: string; url?: string }>;
+      const parsed = JSON.parse(stdout) as Array<{ id: string; type: string; title?: string; url?: string }>;
       const items = parsed.map((item) => ({
         id: item.id,
         type: item.type,
@@ -659,10 +921,11 @@ export class GitHubService {
     }
 
     try {
-      await execFileAsync("gh", args, {
+      await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 256 * 1024
+        maxBuffer: 256 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
       return { repository, owner, project_number: options.project_number, item_url: options.url, dry_run: false, warnings };
     } catch {
@@ -691,12 +954,13 @@ export class GitHubService {
       ".[] | {number, title, state, description, due_on, open_issues, closed_issues, url: .html_url}"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const lines = String(stdout).trim().split("\n").filter((line) => line.length > 0);
+      const lines = stdout.trim().split("\n").filter((line) => line.length > 0);
       const milestones = lines.map((line) => JSON.parse(line) as {
         number: number;
         title: string;
@@ -729,12 +993,13 @@ export class GitHubService {
       "{number, title, state, description, due_on, open_issues, closed_issues, url: .html_url}"
     ];
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: READ_TIMEOUT_MS
       });
-      const milestone = JSON.parse(String(stdout)) as {
+      const milestone = JSON.parse(stdout) as {
         number: number;
         title: string;
         state: string;
@@ -788,12 +1053,13 @@ export class GitHubService {
     }
 
     try {
-      const { stdout } = await execFileAsync("gh", args, {
+      const { stdout } = await this.runner.run("gh", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeoutMs: MUTATING_TIMEOUT_MS
       });
-      const milestone = JSON.parse(String(stdout)) as { number: number; html_url: string };
+      const milestone = JSON.parse(stdout) as { number: number; html_url: string };
       return {
         repository,
         milestone_number: milestone.number,
@@ -811,12 +1077,13 @@ export class GitHubService {
   private async detectGitHubRepository(warnings: string[]): Promise<string | undefined> {
     let remote = "";
     try {
-      const result = await execFileAsync("git", ["remote", "get-url", "origin"], {
+      const { stdout } = await this.runner.run("git", ["remote", "get-url", "origin"], {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: 64 * 1024
+        maxBuffer: 64 * 1024,
+        timeoutMs: 5_000
       });
-      remote = String(result.stdout).trim();
+      remote = stdout.trim();
     } catch {
       warnings.push("GIT_ORIGIN_UNAVAILABLE");
       return undefined;
@@ -824,16 +1091,24 @@ export class GitHubService {
 
     const repository = parseGitHubRemote(remote);
     if (!repository) {
-      warnings.push("GITHUB_ORIGIN_UNSUPPORTED");
+      if (remote.includes("github.com")) {
+        warnings.push("GITHUB_ORIGIN_UNSUPPORTED");
+      } else {
+        warnings.push("GITHUB_ORIGIN_NON_GITHUB");
+      }
     }
     return repository;
   }
 }
 
-function parseGitHubRemote(remote: string): string | undefined {
+export function parseGitHubRemote(remote: string): string | undefined {
   const https = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/.exec(remote);
   if (https) {
     return `${https[1]}/${https[2]}`;
+  }
+  const sshProtocol = /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/.exec(remote);
+  if (sshProtocol) {
+    return `${sshProtocol[1]}/${sshProtocol[2]}`;
   }
   const ssh = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/.exec(remote);
   if (ssh) {
@@ -855,4 +1130,36 @@ function parseIssueNumber(url: string): number | undefined {
 function parsePrNumber(url: string): number | undefined {
   const match = /\/pull\/(\d+)(?:\b|\/|$)/.exec(url);
   return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+function classifyGhError(error: unknown, code: string, fallbackMessage: string): RepoReaderError {
+  const err = error as Error & { code?: string; exitCode?: number };
+  const msg = err?.message ?? String(error);
+  const errCode = err?.code;
+
+  if (errCode === "GH_TIMEOUT") {
+    return new RepoReaderError("GH_UNAVAILABLE", `GitHub CLI timed out. The operation did not complete in time.`, { retryable: true });
+  }
+  if (errCode === "GH_PROCESS_KILLED") {
+    return new RepoReaderError("GH_UNAVAILABLE", `GitHub CLI process was terminated.`, { retryable: true });
+  }
+  if (errCode === "ENOENT" || msg.includes("ENOENT") || msg.includes("not found")) {
+    return new RepoReaderError("GH_UNAVAILABLE", "GitHub CLI ('gh') is not installed or not found in PATH.");
+  }
+  if (msg.includes("not logged in") || msg.includes("authentication") || msg.includes("401") || msg.includes("403")) {
+    return new RepoReaderError("GH_AUTH_FAILED", "GitHub CLI is not authenticated. Run 'gh auth login' first.");
+  }
+  if (errCode === "GH_NONZERO_EXIT") {
+    return new RepoReaderError(code as never, `${fallbackMessage}: exited with code ${err?.exitCode}`);
+  }
+  return new RepoReaderError(code as never, `${fallbackMessage}: ${msg.slice(0, 200)}`);
+}
+
+async function cleanupFile(path: string | undefined): Promise<void> {
+  if (!path) return;
+  try {
+    await unlink(path);
+  } catch {
+    // best-effort cleanup
+  }
 }

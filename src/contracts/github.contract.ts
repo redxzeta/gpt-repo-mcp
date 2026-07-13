@@ -1,6 +1,35 @@
 import { z } from "zod";
 import { RepoInputSchema } from "./repo.contract.js";
 
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_RE = /[\x00-\x08\x0E-\x1F\x7F]/;
+// eslint-disable-next-line no-control-regex
+const NUL_RE = /\x00/;
+const GITHUB_LOGIN_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+
+const GitHubTitleSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((v) => !CONTROL_CHAR_RE.test(v), "Title must not contain control characters.");
+
+const GitHubBodySchema = z
+  .string()
+  .max(65536)
+  .refine((v) => !NUL_RE.test(v), "Body must not contain NUL bytes.");
+
+const GitHubLabelSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((v) => !CONTROL_CHAR_RE.test(v), "Label must not contain control characters.");
+
+const GitHubAssigneeSchema = z
+  .string()
+  .min(1)
+  .max(39)
+  .refine((v) => GITHUB_LOGIN_RE.test(v), "Assignee must be a valid GitHub login (alphanumeric and hyphens, not starting or ending with a hyphen).");
+
 export const GitHubIssueStateSchema = z.enum(["open", "closed", "all"]);
 
 export const GitHubIssuesInputSchema = RepoInputSchema.extend({
@@ -27,32 +56,110 @@ export const GitHubIssuesResultSchema = z.object({
 });
 
 export const GitHubIssueCreateInputSchema = RepoInputSchema.extend({
-  title: z.string().min(1).max(256).describe("Issue title."),
-  body: z.string().min(1).max(20000).optional().describe("Optional issue body."),
-  labels: z.array(z.string().min(1)).max(20).optional().describe("Optional labels to add."),
-  assignees: z.array(z.string().min(1)).max(10).optional().describe("Optional assignee logins."),
-  milestone: z.string().min(1).max(200).optional().describe("Optional milestone name."),
-  dry_run: z.boolean().default(false).describe("Preview the create command without creating the issue.")
+  title: GitHubTitleSchema.describe("Issue title."),
+  body: GitHubBodySchema.optional().describe("Optional issue body."),
+  labels: z.array(GitHubLabelSchema).max(20).optional().describe("Optional labels to add. Labels must already exist on the repository."),
+  assignees: z.array(GitHubAssigneeSchema).max(10).optional().describe("Optional assignee logins."),
+  milestone: z.string().min(1).max(200).optional().describe("Optional milestone title or number."),
+  dry_run: z.boolean().default(false).describe("Preview the create command without creating the issue."),
+  reason: z.string().max(500).optional().describe("Optional audit context. Never sent to GitHub; included in local audit only.")
 });
 
 export const GitHubIssueCreateResultSchema = z.object({
+  created: z.boolean().describe("Whether the issue was actually created."),
   repository: z.string().optional(),
-  issue_number: z.number().int().positive().optional(),
+  number: z.number().int().positive().optional(),
   title: z.string(),
   url: z.string().optional(),
   dry_run: z.boolean(),
+  normalized: z.object({
+    title: z.string(),
+    body: z.boolean(),
+    labels: z.array(z.string()),
+    assignees: z.array(z.string()),
+    milestone: z.string().optional()
+  }).optional().describe("Normalized request summary, present on dry run."),
   warnings: z.array(z.string()).default([])
 });
 
 export const GitHubIssueCommentInputSchema = RepoInputSchema.extend({
   issue_number: z.number().int().positive().describe("Issue number to comment on."),
-  body: z.string().min(1).max(20000).describe("Comment body."),
-  dry_run: z.boolean().default(false).describe("Preview the comment command without posting.")
+  body: GitHubBodySchema.min(1).describe("Comment body."),
+  dry_run: z.boolean().default(false).describe("Preview the comment command without posting."),
+  reason: z.string().max(500).optional().describe("Optional audit context. Never sent to GitHub; included in local audit only.")
+});
+
+export const GitHubIssueEditInputSchema = RepoInputSchema.extend({
+  issue_number: z.number().int().positive().describe("Issue number to edit."),
+  title: GitHubTitleSchema.optional().describe("New issue title."),
+  body: GitHubBodySchema.nullable().optional().describe("New issue body. Send null to clear."),
+  state: z.enum(["open", "closed"]).optional().describe("New issue state."),
+  add_labels: z.array(GitHubLabelSchema).max(20).optional().describe("Labels to add to the issue."),
+  remove_labels: z.array(GitHubLabelSchema).max(20).optional().describe("Labels to remove from the issue."),
+  assignees: z.array(GitHubAssigneeSchema).max(10).optional().describe("Replace assignees with this list. Send empty array to clear."),
+  milestone: z.string().max(200).nullable().optional().describe("Set milestone. Send null to clear."),
+  dry_run: z.boolean().default(false).describe("Preview the edit command without applying."),
+  reason: z.string().max(500).optional().describe("Optional audit context. Never sent to GitHub; included in local audit only.")
+});
+
+export const GitHubIssueEditResultSchema = z.object({
+  edited: z.boolean().describe("Whether the issue was actually edited."),
+  repository: z.string().optional(),
+  number: z.number().int().positive(),
+  url: z.string().optional(),
+  dry_run: z.boolean(),
+  warnings: z.array(z.string()).default([])
+});
+
+export const GitHubIssueDeleteInputSchema = RepoInputSchema.extend({
+  issue_number: z.number().int().positive().describe("Issue number to close or delete."),
+  confirm: z.boolean().describe("Must be true to confirm deletion."),
+  dry_run: z.boolean().default(false).describe("Preview the delete command without deleting."),
+  reason: z.string().max(500).optional().describe("Optional audit context. Never sent to GitHub; included in local audit only.")
+});
+
+export const GitHubIssueDeleteResultSchema = z.object({
+  deleted: z.boolean().describe("Whether the issue was actually deleted."),
+  repository: z.string().optional(),
+  number: z.number().int().positive(),
+  dry_run: z.boolean(),
+  warnings: z.array(z.string()).default([])
+});
+
+export const GitHubLabelListInputSchema = RepoInputSchema.extend({
+  max_results: z.number().int().positive().max(100).default(50).describe("Maximum labels to return.")
+}).describe("List labels for a repository.");
+
+export const GitHubLabelListResultSchema = z.object({
+  repository: z.string().optional(),
+  labels: z.array(z.object({
+    name: z.string(),
+    color: z.string(),
+    description: z.string().optional()
+  })),
+  count: z.number().int().nonnegative(),
+  warnings: z.array(z.string()).default([])
+});
+
+export const GitHubLabelCreateInputSchema = RepoInputSchema.extend({
+  name: z.string().min(1).max(50).refine((v) => !CONTROL_CHAR_RE.test(v), "Label name must not contain control characters.").describe("Label name."),
+  color: z.string().min(1).max(6).regex(/^[0-9a-fA-F]+$/, "Color must be a valid hex color without the # prefix.").describe("Label color as hex without # (e.g. 'ff0000')."),
+  description: z.string().max(200).optional().describe("Optional label description."),
+  dry_run: z.boolean().default(false).describe("Preview the create command without creating the label.")
+}).describe("Create a new label for a repository.");
+
+export const GitHubLabelCreateResultSchema = z.object({
+  created: z.boolean().describe("Whether the label was actually created."),
+  repository: z.string().optional(),
+  name: z.string(),
+  url: z.string().optional(),
+  dry_run: z.boolean(),
+  warnings: z.array(z.string()).default([])
 });
 
 export const GitHubPullRequestCommentInputSchema = RepoInputSchema.extend({
   pr_number: z.number().int().positive().describe("Pull request number to comment on."),
-  body: z.string().min(1).max(20000).describe("Comment body."),
+  body: GitHubBodySchema.min(1).describe("Comment body."),
   dry_run: z.boolean().default(false).describe("Preview the comment command without posting.")
 });
 
@@ -123,14 +230,14 @@ export const GitHubPrReadResultSchema = z.object({
 });
 
 export const GitHubPrCreateInputSchema = RepoInputSchema.extend({
-  title: z.string().min(1).max(256).describe("PR title."),
-  body: z.string().min(1).max(20000).optional().describe("Optional PR body."),
+  title: GitHubTitleSchema.describe("PR title."),
+  body: GitHubBodySchema.optional().describe("Optional PR body."),
   head: z.string().min(1).describe("Head branch name."),
   base: z.string().min(1).describe("Base branch name."),
   draft: z.boolean().default(false).describe("Create as draft PR."),
-  labels: z.array(z.string().min(1)).max(20).optional().describe("Optional labels to add."),
-  assignees: z.array(z.string().min(1)).max(10).optional().describe("Optional assignee logins."),
-  reviewers: z.array(z.string().min(1)).max(10).optional().describe("Optional reviewer logins."),
+  labels: z.array(GitHubLabelSchema).max(20).optional().describe("Optional labels to add."),
+  assignees: z.array(GitHubAssigneeSchema).max(10).optional().describe("Optional assignee logins."),
+  reviewers: z.array(GitHubAssigneeSchema).max(10).optional().describe("Optional reviewer logins."),
   dry_run: z.boolean().default(false).describe("Preview the create command without creating the PR.")
 }).describe("Create a GitHub pull request.");
 
@@ -162,6 +269,10 @@ export const GitHubPrChecksResultSchema = z.object({
 export type GitHubIssuesInput = z.infer<typeof GitHubIssuesInputSchema>;
 export type GitHubIssueCreateInput = z.infer<typeof GitHubIssueCreateInputSchema>;
 export type GitHubIssueCommentInput = z.infer<typeof GitHubIssueCommentInputSchema>;
+export type GitHubIssueEditInput = z.infer<typeof GitHubIssueEditInputSchema>;
+export type GitHubIssueDeleteInput = z.infer<typeof GitHubIssueDeleteInputSchema>;
+export type GitHubLabelListInput = z.infer<typeof GitHubLabelListInputSchema>;
+export type GitHubLabelCreateInput = z.infer<typeof GitHubLabelCreateInputSchema>;
 export type GitHubPullRequestCommentInput = z.infer<typeof GitHubPullRequestCommentInputSchema>;
 export type GitHubIssueReadInput = z.infer<typeof GitHubIssueReadInputSchema>;
 export type GitHubPrListInput = z.infer<typeof GitHubPrListInputSchema>;
@@ -209,8 +320,8 @@ export const GitHubProjectReadResultSchema = z.object({
 });
 
 export const GitHubProjectCreateInputSchema = RepoInputSchema.extend({
-  title: z.string().min(1).max(256).describe("Project title."),
-  body: z.string().min(1).max(20000).optional().describe("Optional project description."),
+  title: GitHubTitleSchema.describe("Project title."),
+  body: GitHubBodySchema.optional().describe("Optional project description."),
   private: z.boolean().default(false).describe("Create as private project."),
   dry_run: z.boolean().default(false).describe("Preview the create command without creating the project.")
 }).describe("Create a GitHub project for the repository owner.");
@@ -300,8 +411,8 @@ export const GitHubMilestoneReadResultSchema = z.object({
 });
 
 export const GitHubMilestoneCreateInputSchema = RepoInputSchema.extend({
-  title: z.string().min(1).max(256).describe("Milestone title."),
-  description: z.string().min(1).max(20000).optional().describe("Optional milestone description."),
+  title: GitHubTitleSchema.describe("Milestone title."),
+  description: GitHubBodySchema.optional().describe("Optional milestone description."),
   due_on: z.string().optional().describe("Optional due date in ISO 8601 format."),
   dry_run: z.boolean().default(false).describe("Preview the create command without creating the milestone.")
 }).describe("Create a GitHub milestone for a repository.");

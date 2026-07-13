@@ -490,7 +490,8 @@ function createModeConfig(mode: PermissionMode) {
   if (mode === "read") {
     return {
       writes: { enabled: false },
-      operations: { enabled: false }
+      operations: { enabled: false },
+      github: { issues_read: true }
     };
   }
 
@@ -509,7 +510,19 @@ function createModeConfig(mode: PermissionMode) {
       }
     : { enabled: false };
 
-  return { writes, operations };
+  const github = mode === "ship"
+    ? {
+        issues_read: true,
+        issues_create: true,
+        issues_edit: true,
+        issues_delete: true,
+        issues_comment: true,
+        labels_read: true,
+        labels_create: true
+      }
+    : { issues_read: true };
+
+  return { writes, operations, github };
 }
 
 async function inferDisplayName(root: string): Promise<string> {

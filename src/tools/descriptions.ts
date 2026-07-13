@@ -27,6 +27,14 @@ export const descriptions = {
     "Use this when the user asks to create a GitHub issue in an approved repo.",
   repo_github_issue_comment:
     "Use this when the user asks to comment on a GitHub issue in an approved repo.",
+  repo_github_issue_edit:
+    "Use this when the user asks to edit, close, reopen, add/remove labels, or change assignees on a GitHub issue.",
+  repo_github_issue_delete:
+    "Use this when the user asks to close or delete a GitHub issue.",
+  repo_github_label_list:
+    "Use this when the user asks to list available labels for a repository.",
+  repo_github_label_create:
+    "Use this when the user asks to create a new label in a repository.",
   repo_github_pr_comment:
     "Use this when the user asks to comment on a GitHub pull request in an approved repo.",
   repo_github_issue_read:

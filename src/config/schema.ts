@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_GITHUB_POLICY } from "../policies/github-defaults.js";
 import { DEFAULT_OPERATIONS_POLICY } from "../policies/operations-defaults.js";
 import { DEFAULT_WRITE_POLICY } from "../policies/write-defaults.js";
 
@@ -33,6 +34,16 @@ export const ActionsConfigSchema = z.object({
   definitions: z.record(z.string(), ActionDefinitionSchema).default({}).describe("Named action definitions.")
 }).passthrough();
 
+export const GitHubPolicyConfigSchema = z.object({
+  issues_read: z.boolean().default(DEFAULT_GITHUB_POLICY.issues_read).describe("Allow reading GitHub issues."),
+  issues_create: z.boolean().default(DEFAULT_GITHUB_POLICY.issues_create).describe("Allow creating GitHub issues."),
+  issues_edit: z.boolean().default(DEFAULT_GITHUB_POLICY.issues_edit).describe("Allow editing GitHub issues."),
+  issues_delete: z.boolean().default(DEFAULT_GITHUB_POLICY.issues_delete).describe("Allow deleting GitHub issues."),
+  issues_comment: z.boolean().default(DEFAULT_GITHUB_POLICY.issues_comment).describe("Allow commenting on GitHub issues."),
+  labels_read: z.boolean().default(DEFAULT_GITHUB_POLICY.labels_read).describe("Allow reading GitHub labels."),
+  labels_create: z.boolean().default(DEFAULT_GITHUB_POLICY.labels_create).describe("Allow creating GitHub labels.")
+}).passthrough();
+
 export const RepoConfigSchema = z.object({
   repo_id: z.string().min(1),
   display_name: z.string().min(1),
@@ -40,7 +51,8 @@ export const RepoConfigSchema = z.object({
   allow_non_git: z.boolean().optional(),
   writes: WritePolicyConfigSchema.default(DEFAULT_WRITE_POLICY),
   operations: OperationsPolicyConfigSchema.default(DEFAULT_OPERATIONS_POLICY),
-  actions: ActionsConfigSchema.optional()
+  actions: ActionsConfigSchema.optional(),
+  github: GitHubPolicyConfigSchema.optional()
 }).passthrough();
 
 export const LimitsConfigSchema = z.object({
@@ -70,6 +82,8 @@ export const RepoReaderConfigSchema = z.object({
 export type WritePolicyConfigDocument = z.input<typeof WritePolicyConfigSchema>;
 export type OperationsPolicyConfigDocument = z.input<typeof OperationsPolicyConfigSchema>;
 export type ActionsConfigDocument = z.input<typeof ActionsConfigSchema>;
+export type GitHubPolicyConfigDocument = z.input<typeof GitHubPolicyConfigSchema>;
+
 export type RepoConfig = {
   repo_id: string;
   display_name: string;
@@ -78,6 +92,7 @@ export type RepoConfig = {
   writes?: WritePolicyConfigDocument;
   operations?: OperationsPolicyConfigDocument;
   actions?: ActionsConfigDocument;
+  github?: GitHubPolicyConfigDocument;
 };
 export type RepoReaderConfig = {
   repos: RepoConfig[];

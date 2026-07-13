@@ -9,7 +9,6 @@ import { describe, expect, test } from "vitest";
 import { SERVER_INSTRUCTIONS, createMcpServer } from "../src/register.js";
 import { RootRegistry } from "../src/services/root-registry.js";
 import { createSessionCache } from "../src/runtime/session-cache.js";
-import { readOnlyAnnotations, writeAnnotations } from "../src/tools/annotations.js";
 import { toolCatalog } from "../src/tools/catalog.js";
 import { isMutatingToolName } from "../src/tools/mutating-tools.js";
 
@@ -52,10 +51,14 @@ describe("MCP contract", () => {
         expect(tool.description).toEqual(expect.stringMatching(/^Use this when/));
         expect(tool.inputSchema).toBeDefined();
         expect(tool.outputSchema).toBeDefined();
+        expect(tool.annotations).toBeDefined();
+        const ann = tool.annotations!;
         if (isMutatingToolName(tool.name)) {
-          expect(tool.annotations).toMatchObject(writeAnnotations);
+          expect(ann.readOnlyHint).toBe(false);
+          expect(ann.destructiveHint).toBe(true);
         } else {
-          expect(tool.annotations).toMatchObject(readOnlyAnnotations);
+          expect(ann.readOnlyHint).toBe(true);
+          expect(ann.destructiveHint).toBe(false);
         }
       }
     } finally {
@@ -392,13 +395,16 @@ describe("MCP contract", () => {
               "dry_run",
               "labels",
               "milestone",
+              "reason",
               "repo_id",
               "title",
             ],
             "name": "repo_github_issue_create",
             "outputKeys": [
+              "created",
               "dry_run",
-              "issue_number",
+              "normalized",
+              "number",
               "repository",
               "title",
               "url",
@@ -418,6 +424,7 @@ describe("MCP contract", () => {
               "body",
               "dry_run",
               "issue_number",
+              "reason",
               "repo_id",
             ],
             "name": "repo_github_issue_comment",
@@ -428,6 +435,110 @@ describe("MCP contract", () => {
               "warnings",
             ],
             "title": "Comment on GitHub issue",
+          },
+          {
+            "annotations": {
+              "destructiveHint": true,
+              "idempotentHint": false,
+              "openWorldHint": true,
+              "readOnlyHint": false,
+            },
+            "description": "Use this when the user asks to edit, close, reopen, add/remove labels, or change assignees on a GitHub issue.",
+            "inputKeys": [
+              "add_labels",
+              "assignees",
+              "body",
+              "dry_run",
+              "issue_number",
+              "milestone",
+              "reason",
+              "remove_labels",
+              "repo_id",
+              "state",
+              "title",
+            ],
+            "name": "repo_github_issue_edit",
+            "outputKeys": [
+              "dry_run",
+              "edited",
+              "number",
+              "repository",
+              "url",
+              "warnings",
+            ],
+            "title": "Edit GitHub issue",
+          },
+          {
+            "annotations": {
+              "destructiveHint": true,
+              "idempotentHint": false,
+              "openWorldHint": true,
+              "readOnlyHint": false,
+            },
+            "description": "Use this when the user asks to close or delete a GitHub issue.",
+            "inputKeys": [
+              "confirm",
+              "dry_run",
+              "issue_number",
+              "reason",
+              "repo_id",
+            ],
+            "name": "repo_github_issue_delete",
+            "outputKeys": [
+              "deleted",
+              "dry_run",
+              "number",
+              "repository",
+              "warnings",
+            ],
+            "title": "Delete GitHub issue",
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": true,
+              "readOnlyHint": true,
+            },
+            "description": "Use this when the user asks to list available labels for a repository.",
+            "inputKeys": [
+              "max_results",
+              "repo_id",
+            ],
+            "name": "repo_github_label_list",
+            "outputKeys": [
+              "count",
+              "labels",
+              "repository",
+              "warnings",
+            ],
+            "title": "List GitHub labels",
+          },
+          {
+            "annotations": {
+              "destructiveHint": true,
+              "idempotentHint": false,
+              "openWorldHint": true,
+              "readOnlyHint": false,
+            },
+            "description": "Use this when the user asks to create a new label in a repository.",
+            "inputKeys": [
+              "color",
+              "description",
+              "dry_run",
+              "name",
+              "repo_id",
+            ],
+            "name": "repo_github_label_create",
+            "outputKeys": [
+              "created",
+              "dry_run",
+              "name",
+              "repository",
+              "url",
+              "warnings",
+            ],
+            "title": "Create GitHub label",
           },
           {
             "annotations": {

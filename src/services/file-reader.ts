@@ -5,7 +5,7 @@ import { FileClassifier } from "./file-classifier.js";
 import { IgnoreEngine, isPublicEnvTemplatePath } from "./ignore-engine.js";
 import { PathSandbox } from "./path-sandbox.js";
 import { SecretScanner } from "./secret-scanner.js";
-import { readFilePrefix } from "./bounded-read.js";
+import { readFilePrefix, readLineRange } from "./bounded-read.js";
 
 export type FetchFileOptions = {
   path: string;
@@ -40,6 +40,39 @@ export class FileReader {
     }
 
     const maxBytes = Math.min(options.max_bytes ?? DEFAULT_LIMITS.max_bytes_per_file, DEFAULT_LIMITS.max_bytes_per_file);
+    const hasRange = options.start_line !== undefined || options.end_line !== undefined;
+    const startLine = options.start_line ?? 1;
+
+    if (hasRange) {
+      const endLine = options.end_line ?? Number.MAX_SAFE_INTEGER;
+      const rangeResult = await readLineRange(resolved.absolutePath, startLine, endLine, maxBytes).catch((err) => {
+        if (err instanceof Error && err.message === "RANGE_SIZE_LIMIT_EXCEEDED") {
+          throw new RepoReaderError("SIZE_LIMIT_EXCEEDED", `Requested line range exceeds max_bytes for: ${resolved.repoPath}`);
+        }
+        throw err;
+      });
+
+      const classification = await this.classifier.classify(resolved.repoPath, resolved.absolutePath);
+      if (classification.is_binary) {
+        throw new RepoReaderError("BINARY_FILE_REJECTED", `Binary file blocked: ${resolved.repoPath}`);
+      }
+
+      const text = this.secretScanner.redact(rangeResult.text);
+
+      return {
+        path: resolved.repoPath,
+        language: classification.language,
+        size_bytes: Number(resolved.stat.size),
+        sha256: "",  // not computed for ranged reads to avoid loading entire file
+        total_lines: rangeResult.totalLines,
+        start_line: rangeResult.startLine,
+        end_line: rangeResult.endLine,
+        truncated: rangeResult.endLine < endLine,
+        text,
+        warnings
+      };
+    }
+
     const { buffer: content, truncated } = await readFilePrefix(resolved.absolutePath, maxBytes);
     if (truncated) {
       throw new RepoReaderError("SIZE_LIMIT_EXCEEDED", `File exceeds max_bytes: ${resolved.repoPath}`);
@@ -55,9 +88,7 @@ export class FileReader {
     }
     const text = this.secretScanner.redact(rawText);
     const lines = text.split(/\r?\n/);
-    const startLine = options.start_line ?? 1;
-    const endLine = options.end_line ?? lines.length;
-    const selected = lines.slice(startLine - 1, endLine).join("\n");
+    const endLine = lines.length;
 
     return {
       path: resolved.repoPath,
@@ -65,10 +96,10 @@ export class FileReader {
       size_bytes: content.byteLength,
       sha256: createHash("sha256").update(content).digest("hex"),
       total_lines: lines.length,
-      start_line: startLine,
-      end_line: Math.min(endLine, lines.length),
+      start_line: 1,
+      end_line: endLine,
       truncated: false,
-      text: selected,
+      text,
       warnings
     };
   }

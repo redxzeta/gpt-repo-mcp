@@ -19,10 +19,18 @@ export type AuditEvent = {
   counts?: Record<string, number>;
   truncated?: boolean;
   warnings?: string[];
+  error?: string;
   request_id?: string;
   mcp_method?: string;
   mcp_tool?: string;
   run_id?: string;
+  resolved_repository?: string;
+  dry_run?: boolean;
+  issue_number?: number;
+  issue_url?: string;
+  title_length?: number;
+  duration_ms?: number;
+  reason?: string;
 };
 
 export type RequestAuditEvent = {
