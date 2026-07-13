@@ -72,8 +72,8 @@ export class ReleaseNotesService {
       );
       const tag = stdout.trim();
       return tag || undefined;
-    } catch {
-      warnings.push("NO_TAGS_FOUND");
+    } catch (err) {
+      warnings.push(`NO_TAGS_FOUND: ${String(err).slice(0, 200)}`);
       return undefined;
     }
   }
@@ -89,7 +89,7 @@ export class ReleaseNotesService {
       const { stdout } = await execFileAsync("git", args, {
         cwd: this.root,
         encoding: "utf8",
-        maxBuffer: maxBytes + 1024,
+        maxBuffer: maxBytes + 4096,
         env: { PATH: process.env.PATH ?? "" }
       });
       const text = stdout;
@@ -101,8 +101,8 @@ export class ReleaseNotesService {
         return { sha, short_sha, subject: subject ?? "", author: authorParts.join("|") };
       });
       return entries;
-    } catch {
-      warnings.push("GIT_LOG_FAILED");
+    } catch (err) {
+      warnings.push(`GIT_LOG_FAILED: ${String(err).slice(0, 200)}`);
       return [];
     }
   }

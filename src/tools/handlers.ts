@@ -930,6 +930,6 @@ export const manifestHandler: ToolHandler = async (input, context) => safeTool<M
 export const releaseNotesHandler: ToolHandler = async (input, context) => safeTool<ReleaseNotesInput>("repo_release_notes", input, context, async (args) => {
   const repo = context.registry.get(args.repo_id);
   const result = await new ReleaseNotesService(repo.root).generate(args);
-  audit({ tool: "repo_release_notes", repo_id: args.repo_id, counts: { commits: result.commit_count } });
+  audit({ tool: "repo_release_notes", repo_id: args.repo_id, counts: { commits: result.commit_count }, warnings: result.warnings });
   return createSuccessEnvelope(result, `Release notes: ${result.commit_count} commits from ${result.from} to ${result.to}.`);
 });
